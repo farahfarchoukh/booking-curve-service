@@ -17,7 +17,7 @@
 # different set of OS-level CVEs) than the one this Dockerfile was actually
 # built and verified against. Re-resolve deliberately (`docker pull
 # python:3.11-slim` + update this digest) rather than let it drift.
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
+FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
 
 WORKDIR /app
 
