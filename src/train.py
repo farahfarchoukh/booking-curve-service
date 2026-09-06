@@ -44,7 +44,7 @@ from .data import (
 )
 from .features import CATEGORICAL_FEATURES, LEVEL_FEATURES, SHAPE_FEATURES
 from .logging_config import get_logger
-from .model import BookingCurveModel
+from .model import BookingCurveModel, room_key
 from .registry import new_version, save_pointer
 
 log = get_logger(__name__)
@@ -55,6 +55,32 @@ TRAIN_FLOOR = "2025-01-01"  # earliest plausible stay date in the whole dataset
 LEVEL_SHRINK_K = 15.0
 SHAPE_SHRINK_K = 30.0
 INTERVAL_WIDEN_K = 1.5
+# Second (finer) pooling level: (hotel, room_type) correction fit on the
+# residual left over after the per-hotel correction above — see
+# model.py's docstring for why room types within a hotel aren't
+# exchangeable. Larger K than the hotel level on purpose: a single room
+# type's curve count is always a subset of its hotel's, so this shrinks
+# harder by construction already; the larger K on top of that is a
+# deliberate extra brake, since a second correction layered on a first is
+# more exposed to overfitting noise in a small dataset than the first
+# layer was on its own.
+ROOM_LEVEL_SHRINK_K = 20.0
+ROOM_SHAPE_SHRINK_K = 40.0
+# A floor below which a room type's own OOF residual mean isn't a
+# meaningfully identifiable second level at all — the shrink weight
+# n/(n+K) discounts it smoothly, but "smoothly small" is not the same
+# question as "reliably estimated." A room type seen on a handful of
+# curves (hotel_H's thinnest types: 1, 1, 2, 7 curves in this dataset)
+# has an OOF residual mean with enough of its own variance that even a
+# heavily shrunk correction can move the point estimate in the wrong
+# direction more often than not; a hard floor says "with this little of
+# its own history, fall back to the hotel-level correction alone,
+# exactly as if this room type had never been split out." Chosen from
+# looking at this dataset's own room-type curve-count *distribution*
+# (there's a real gap between hotel_C's room types, all 76-93 curves,
+# and hotel_H's, all <=15) — not by tuning against the July-Sept test
+# set, which would be leakage for a hyperparameter choice.
+MIN_ROOM_N_FOR_POOLING = 20
 # Extra interval inflation per 30 days of stay-date sitting outside the
 # observed training day-of-year range (see model.py._extrapolation_widen).
 # Chosen as a modest, order-of-magnitude prior for "uncertainty grows the
@@ -65,6 +91,15 @@ INTERVAL_WIDEN_K = 1.5
 # can't fully repair.
 EXTRAPOLATION_GAMMA = 1.0
 
+# A single source of truth for "the seed" — the DEFAULT one, used unless
+# run_training(..., seed=...) or `--seed` overrides it (see
+# evaluation/seed_sensitivity.py, which retrains as a subprocess per seed
+# so there's no import-order/module-global-mutation footgun). Overriding it
+# changes both the LightGBM training seed AND the OOF KFold split below, so
+# "seed sensitivity" means "what if the whole pipeline had drawn a
+# different arbitrary seed," not just the boosters in isolation.
+SEED = 42
+
 # seed + deterministic + force_row_wise: without these, two runs on
 # identical data can pick different split ties under multi-threaded
 # histogram building, which is exactly what happened during development —
@@ -72,8 +107,11 @@ EXTRAPOLATION_GAMMA = 1.0
 # and shuffled which of two near-tied features got the split. That's a real
 # problem for a production model: "retrain" should be reproducible enough
 # that CI can build an image and know it's bit-for-bit the model it tested,
-# and a rollback comparison isn't chasing training noise.
-_DETERMINISM = dict(seed=42, deterministic=True, force_row_wise=True)
+# and a rollback comparison isn't chasing training noise. Determinism
+# (bit-for-bit reproducibility under the SAME seed) and seed sensitivity
+# (whether conclusions hold under a DIFFERENT seed) are different
+# questions — see evaluation/seed_sensitivity.py for the latter.
+_DETERMINISM = dict(seed=SEED, deterministic=True, force_row_wise=True)
 
 LEVEL_LGB_PARAMS = dict(
     objective="regression_l1",
@@ -158,6 +196,9 @@ def run_training(
     model_base_dir: Path,
     version: str | None = None,
     promote: bool = True,
+    seed: int = SEED,
+    train_end: str | None = None,
+    val_start: str | None = None,
 ) -> Path:
     """Runs the full pipeline and saves a versioned artifact under
     `model_base_dir/<version>/`. Returns that directory.
@@ -166,9 +207,28 @@ def run_training(
     by tests and by a "canary" workflow where you want the artifact on disk
     for evaluation before it's live (see DESIGN.md §6.5's shadow/canary
     discussion; this is the concrete hook for it).
+
+    `seed` overrides the module default (see SEED above) for both the
+    LightGBM boosters and the OOF KFold split — the hook
+    evaluation/seed_sensitivity.py uses to retrain under different seeds
+    without mutating module state.
+
+    `train_end` overrides the module default (data.TRAIN_END) — the hook
+    evaluation/rolling_backtest.py uses to retrain at several different
+    walk-forward cutoffs. `val_start` (the internal round-tuning holdout)
+    defaults to 21 days before whatever `train_end` ends up being, not a
+    fixed calendar date, so it stays "the last ~3 weeks of the train
+    window" at every cutoff instead of silently drifting outside the
+    training window (or swallowing the whole thing) as train_end moves.
     """
     version = new_version(version)
     out_dir = model_base_dir / version
+
+    train_end = train_end or TRAIN_END
+    val_start = val_start or (pd.Timestamp(train_end) - pd.Timedelta(days=21)).strftime("%Y-%m-%d")
+
+    level_lgb_params = dict(LEVEL_LGB_PARAMS, seed=seed)
+    shape_lgb_params_base = dict(SHAPE_LGB_PARAMS, seed=seed)
 
     log.info(f"Loading data from {data_dir} ...")
     static = load_static_context(data_dir)
@@ -176,9 +236,9 @@ def run_training(
 
     reservation_hotels = hotels_with_reservations(reservations)
     log.info(f"Hotels with reservation history in this data: {reservation_hotels}")
-    log.info(f"Building actual-curve training table (stay_date <= {TRAIN_END}) ...")
+    log.info(f"Building actual-curve training table (stay_date <= {train_end}) ...")
     long_df = build_actual_curve_table(
-        reservations, static, TRAIN_FLOOR, TRAIN_END, hotels=reservation_hotels
+        reservations, static, TRAIN_FLOOR, train_end, hotels=reservation_hotels
     )
     log.info(f"  {long_df['stay_date'].nunique()} distinct nights, {len(long_df):,} long rows")
     level_df, shape_df = _make_level_shape_tables(long_df)
@@ -196,17 +256,17 @@ def run_training(
     )
 
     # ---- 1-2. time-based split for round-count tuning -------------------
-    is_val = level_df.stay_date >= pd.Timestamp(VAL_START)
+    is_val = level_df.stay_date >= pd.Timestamp(val_start)
     val_curve_ids = set(level_df.loc[is_val, "curve_id"])
     log.info(
         f"Internal time-split validation: {is_val.sum()} / {len(level_df)} curves "
-        f"(stay_date >= {VAL_START})"
+        f"(stay_date >= {val_start})"
     )
 
     X_level_tr = _prep_matrix(static, cats, level_df.loc[~is_val], include_cp=False)
     X_level_val = _prep_matrix(static, cats, level_df.loc[is_val], include_cp=False)
     level_rounds = _best_rounds(
-        LEVEL_LGB_PARAMS,
+        level_lgb_params,
         X_level_tr, level_df.loc[~is_val, "y"],
         X_level_val, level_df.loc[is_val, "y"],
         CATEGORICAL_FEATURES,
@@ -215,7 +275,7 @@ def run_training(
 
     monotone = [0] * len(SHAPE_FEATURES)
     monotone[SHAPE_FEATURES.index("cp")] = -1
-    shape_probe_params = dict(SHAPE_LGB_PARAMS, monotone_constraints=monotone)
+    shape_probe_params = dict(shape_lgb_params_base, monotone_constraints=monotone)
 
     shape_is_val = shape_df.curve_id.isin(val_curve_ids)
     X_shape_tr = _prep_matrix(static, cats, shape_df.loc[~shape_is_val], include_cp=True)
@@ -230,7 +290,7 @@ def run_training(
 
     # quick internal-validation sanity read (combined curve MAE on the June holdout)
     level_probe = lgb.train(
-        LEVEL_LGB_PARAMS,
+        level_lgb_params,
         lgb.Dataset(X_level_tr, level_df.loc[~is_val, "y"], categorical_feature=CATEGORICAL_FEATURES),
         num_boost_round=level_rounds,
     )
@@ -244,7 +304,7 @@ def run_training(
     log.info("Refitting final boosters on the full train window ...")
     X_level_full = _prep_matrix(static, cats, level_df, include_cp=False)
     level_booster = lgb.train(
-        LEVEL_LGB_PARAMS,
+        level_lgb_params,
         lgb.Dataset(X_level_full, level_df["y"], categorical_feature=CATEGORICAL_FEATURES),
         num_boost_round=level_rounds,
     )
@@ -259,7 +319,7 @@ def run_training(
     # ---- 4. grouped 5-fold OOF residuals -> per-hotel shrinkage -----------
     log.info("Computing grouped 5-fold OOF residuals for per-hotel shrinkage ...")
     curve_ids = level_df["curve_id"].to_numpy()
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    kf = KFold(n_splits=5, shuffle=True, random_state=seed)
     oof_level = np.full(len(level_df), np.nan)
     oof_shape = np.full(len(shape_df), np.nan)
     oof_level_q = {q: np.full(len(level_df), np.nan) for q in (0.1, 0.5, 0.9)}
@@ -273,7 +333,7 @@ def run_training(
         X_lvl_te_fold = _prep_matrix(static, cats, level_df.loc[m_lvl_te], include_cp=False)
 
         booster = lgb.train(
-            LEVEL_LGB_PARAMS,
+            level_lgb_params,
             lgb.Dataset(X_lvl_tr_fold, level_df.loc[m_lvl, "y"], categorical_feature=CATEGORICAL_FEATURES),
             num_boost_round=level_rounds,
         )
@@ -284,7 +344,7 @@ def run_training(
         # correction, tuned for the L1 point model, badly undercovered when
         # reused for quantile heads with their own systematic bias).
         for q in (0.1, 0.5, 0.9):
-            qparams = dict(LEVEL_LGB_PARAMS, objective="quantile", alpha=q)
+            qparams = dict(level_lgb_params, objective="quantile", alpha=q)
             qbooster = lgb.train(
                 qparams,
                 lgb.Dataset(X_lvl_tr_fold, level_df.loc[m_lvl, "y"], categorical_feature=CATEGORICAL_FEATURES),
@@ -332,6 +392,52 @@ def run_training(
     log.info(f"  raw shape OOF residual (mean): {shape_shrink_raw_r}")
     log.info(f"  applied shape shrink correction: {shape_shrink_r}")
 
+    # ---- 4a. second-level (hotel, room_type) shrinkage ---------------------
+    # Fit on what the hotel-level correction above left behind, not on the
+    # raw OOF residual — this is nested empirical Bayes (backbone -> hotel
+    # -> room_type), not two independent corrections competing for the same
+    # signal. See model.py module docstring for the reasoning.
+    log.info("Computing (hotel, room_type) second-level shrinkage ...")
+    level_df["room_key"] = level_df.apply(lambda r: room_key(r.hotel_id, r.room_type_code), axis=1)
+    shape_df["room_key"] = shape_df.apply(lambda r: room_key(r.hotel_id, r.room_type_code), axis=1)
+    level_df["resid_after_hotel"] = level_df["oof_resid"] - level_df["hotel_id"].map(level_shrink)
+    shape_df["resid_after_hotel"] = shape_df["oof_resid"] - shape_df["hotel_id"].map(shape_shrink)
+
+    room_n_obs = level_df.groupby("room_key").size().to_dict()
+    room_level_raw = level_df.groupby("room_key")["resid_after_hotel"].mean().to_dict()
+    room_shape_raw = shape_df.groupby("room_key")["resid_after_hotel"].mean().to_dict()
+
+    room_level_shrink = {
+        rk: (n / (n + ROOM_LEVEL_SHRINK_K)) * room_level_raw.get(rk, 0.0)
+        for rk, n in room_n_obs.items()
+        if n >= MIN_ROOM_N_FOR_POOLING
+    }
+    # shape's room_n_obs would double-count checkpoint rows if taken from
+    # shape_df directly (9 rows per curve) — reuse the curve-level count
+    # from level_df's room_n_obs so the shrink weight reflects "how many
+    # curves have we seen for this room type," the same unit as the
+    # hotel-level weight, not "how many checkpoint-rows."
+    room_shape_shrink = {
+        rk: (n / (n + ROOM_SHAPE_SHRINK_K)) * room_shape_raw.get(rk, 0.0)
+        for rk, n in room_n_obs.items()
+        if n >= MIN_ROOM_N_FOR_POOLING
+    }
+    n_pooled = len(room_level_shrink)
+    n_total = len(room_n_obs)
+    log.info(
+        f"  room types with enough history to get a second-level correction "
+        f"(n >= {MIN_ROOM_N_FOR_POOLING}): {n_pooled}/{n_total}"
+    )
+    log.info(f"  room_n_obs: {room_n_obs}")
+    log.info(
+        "  applied room-level level-shrink correction: %s",
+        {k: round(v, 4) for k, v in room_level_shrink.items()},
+    )
+    log.info(
+        "  applied room-level shape-shrink correction: %s",
+        {k: round(v, 4) for k, v in room_shape_shrink.items()},
+    )
+
     # ---- 4b. conformal calibration of the quantile heads -------------------
     # A raw LightGBM "quantile" objective booster is not automatically
     # calibrated (pinball loss minimizes conditional quantile risk on the
@@ -361,7 +467,7 @@ def run_training(
     log.info("Fitting P10/P50/P90 quantile boosters (level target) ...")
     level_q_boosters = {}
     for q in (0.1, 0.5, 0.9):
-        params = dict(LEVEL_LGB_PARAMS)
+        params = dict(level_lgb_params)
         params["objective"] = "quantile"
         params["alpha"] = q
         level_q_boosters[q] = lgb.train(
@@ -382,16 +488,22 @@ def run_training(
         shape_shrink_k=SHAPE_SHRINK_K,
         hotel_n_obs=hotel_n_obs,
         interval_widen_k=INTERVAL_WIDEN_K,
+        room_level_shrink=room_level_shrink,
+        room_shape_shrink=room_shape_shrink,
+        room_level_shrink_k=ROOM_LEVEL_SHRINK_K,
+        room_shape_shrink_k=ROOM_SHAPE_SHRINK_K,
+        room_n_obs=room_n_obs,
         level_q_shift=level_q_shift,
         train_doy_range=(int(level_df.stay_date.dt.dayofyear.min()), int(level_df.stay_date.dt.dayofyear.max())),
         extrapolation_gamma=EXTRAPOLATION_GAMMA,
         meta={
             "level_rounds": level_rounds,
             "shape_rounds": shape_rounds,
-            "train_end": TRAIN_END,
-            "val_start": VAL_START,
+            "train_end": train_end,
+            "val_start": val_start,
             "n_level_rows": len(level_df),
             "n_shape_rows": len(shape_df),
+            "seed": seed,
         },
     )
     model.save(out_dir)
@@ -427,13 +539,24 @@ def main():
         help="Save the versioned artifact but don't update current.json — "
         "for shadow/canary training runs that shouldn't go live yet.",
     )
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=SEED,
+        help=f"Override the training seed (default: {SEED}). Used by "
+        "evaluation/seed_sensitivity.py to check whether results hold up "
+        "under a different arbitrary seed, not just reproduce bit-for-bit "
+        "under the same one.",
+    )
     args = ap.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
     data_dir = Path(args.data_dir) if args.data_dir else repo_root / "data"
     model_base_dir = Path(args.out) if args.out else repo_root / "artifacts" / "model"
 
-    run_training(data_dir, model_base_dir, version=args.version, promote=not args.no_promote)
+    run_training(
+        data_dir, model_base_dir, version=args.version, promote=not args.no_promote, seed=args.seed
+    )
 
 
 if __name__ == "__main__":

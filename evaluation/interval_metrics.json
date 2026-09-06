@@ -1,26 +1,26 @@
 {
   "n_checkpoints_scored": 25210,
-  "picp": 0.3928,
-  "share_below_p10": 0.0722,
-  "share_above_p90": 0.535,
-  "mean_interval_width": 0.3939,
-  "mean_pinball_loss": 0.1034,
+  "picp": 0.6237,
+  "share_below_p10": 0.0339,
+  "share_above_p90": 0.3424,
+  "mean_interval_width": 0.4384,
+  "mean_pinball_loss": 0.0877,
   "pinball_loss_by_quantile": {
-    "p10": 0.0613,
-    "p50": 0.1179,
-    "p90": 0.131
+    "p10": 0.0592,
+    "p50": 0.1061,
+    "p90": 0.0979
   },
   "by_hotel": {
     "hotel_C": {
-      "picp": 0.396,
-      "share_below_p10": 0.1219,
-      "share_above_p90": 0.482,
+      "picp": 0.669,
+      "share_below_p10": 0.0573,
+      "share_above_p90": 0.2737,
       "n": 14930
     },
     "hotel_H": {
-      "picp": 0.388,
+      "picp": 0.558,
       "share_below_p10": 0.0,
-      "share_above_p90": 0.612,
+      "share_above_p90": 0.442,
       "n": 10280
     }
   }

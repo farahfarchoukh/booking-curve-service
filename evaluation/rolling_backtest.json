@@ -1,0 +1,38 @@
+[
+  {
+    "train_end": "2025-05-31",
+    "test_window": "2025-06-01..2025-06-30",
+    "n_matched": 520,
+    "overall_mae": 0.261465,
+    "weighted_mae": 0.242452,
+    "hotel_C_mae": 0.258615,
+    "hotel_H_mae": 0.332713
+  },
+  {
+    "train_end": "2025-06-30",
+    "test_window": "2025-07-01..2025-07-31",
+    "n_matched": 742,
+    "overall_mae": 0.266151,
+    "weighted_mae": 0.253561,
+    "hotel_C_mae": 0.250606,
+    "hotel_H_mae": 0.300973
+  },
+  {
+    "train_end": "2025-07-31",
+    "test_window": "2025-08-01..2025-08-31",
+    "n_matched": 920,
+    "overall_mae": 0.247792,
+    "weighted_mae": 0.233217,
+    "hotel_C_mae": 0.26179,
+    "hotel_H_mae": 0.229913
+  },
+  {
+    "train_end": "2025-08-31",
+    "test_window": "2025-09-01..2025-09-30",
+    "n_matched": 859,
+    "overall_mae": 0.237512,
+    "weighted_mae": 0.23021,
+    "hotel_C_mae": 0.272183,
+    "hotel_H_mae": 0.196785
+  }
+]

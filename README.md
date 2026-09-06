@@ -37,9 +37,9 @@ Test window: 2025-07-01 → 2025-09-30, `hotel_C` + `hotel_H`, scored by `evalua
 | Model | Overall MAE | Weighted MAE | Monotonicity violations | Bound violations |
 |---|---:|---:|---:|---:|
 | Heuristic baseline (`starter/baseline_model.py`) | 0.3478 | 0.3476 | 0.0% | 0.0% |
-| **This model** | **0.3008** | **0.3061** | **0.0%** | **0.0%** |
+| **This model** | **0.2673** | **0.2653** | **0.0%** | **0.0%** |
 
-~13–14% relative reduction in both MAE metrics, zero constraint violations (enforced structurally, not just empirically — see `enforce_curve_constraints` in `src/model.py`).
+~23% relative reduction in both MAE metrics, zero constraint violations (enforced structurally, not just empirically — see `enforce_curve_constraints` in `src/model.py`). That margin isn't just an eyeballed comparison: `evaluation/significance_test.py` runs a cluster bootstrap at the (hotel, room_type) series level (32 clusters, not the 2,521 individual checkpoints, which aren't independent) and gets a 95% CI of **[−0.116, −0.050]** on the difference — excludes zero, p≈0.0000. `evaluation/seed_sensitivity.py` confirms it isn't an artifact of one lucky seed (std 0.007 across 5 seeds, well inside that margin), and `evaluation/rolling_backtest.py` confirms it isn't an artifact of one lucky train/test split (4 expanding-window folds, weighted MAE 0.230–0.254 throughout). See `DESIGN.md` §6.9 for all three in full.
 
 Head-to-head against Ampliphi's production parametric curve is only possible on `hotel_C`'s base room type (`rt_ea30c05c4c`) — the only room `expected_booking_curves.csv` covers for hotel_C (`python evaluation/compare_production.py`):
 
@@ -47,11 +47,11 @@ Head-to-head against Ampliphi's production parametric curve is only possible on 
 |---|---:|---:|---:|
 | Heuristic baseline | 92 | 0.3117 | 0.3332 |
 | Ampliphi `expected_booking_curves` (production) | 23* | 0.2798 | 0.2623 |
-| **This model** | 92 | **0.1850** | **0.1766** |
+| **This model** | 92 | **0.1748** | **0.1641** |
 
 \*production curve only has all 10 checkpoints present for 23 of the 92 test nights — small-sample, but directionally consistent with the full-grid result above.
 
-Per-hotel breakdown (`evaluation/results.json`) is worth reading past the headline number: `hotel_C` MAE *improves* from 0.29 (90d out) to 0.18 (day-of) — the normal pattern for a hotel with real training history. `hotel_H` runs the other way — 0.11 (90d out) degrading to ~0.43 near the stay — because its Jul–Sep busy season is unseen in its own Apr–Jun training data, so the gap between our under-anchored level and true late-arriving demand *widens* as the stay approaches. This is diagnosed in depth in `DESIGN.md` §6.2/§6.7 and is the single most important honest finding in this project — not smoothed over.
+Per-hotel breakdown (`evaluation/results.json`) is worth reading past the headline number: `hotel_C` MAE *improves* from 0.30 (90d out) to 0.15 (day-of) — the normal pattern for a hotel with real training history. `hotel_H` runs the other way — 0.11 (90d out) degrading to ~0.34 near the stay — because its Jul–Sep busy season is unseen in its own Apr–Jun training data, so the gap between our under-anchored level and true late-arriving demand *widens* as the stay approaches. This is diagnosed in depth in `DESIGN.md` §6.2/§6.7, and the same season-coverage gap is what motivated the extrapolation-correction-damping fix in §6.8 (a real bug this project's ablation study caught: the per-hotel bias correction was, before that fix, actively making test performance *worse* than no correction at all — see §6.8 for the honest before/after).
 
 ## How to run
 
@@ -71,13 +71,18 @@ python -m src.predict --generate-eval             # writes evaluation/prediction
 python evaluation/evaluate.py --predictions evaluation/predictions.json --data-dir data
 python evaluation/compare_production.py           # vs. baseline + production curve
 python evaluation/interval_metrics.py              # PICP / pinball loss — the source of the numbers in DESIGN.md §6.7
+python evaluation/significance_test.py             # cluster bootstrap: is "beats baseline" real? (DESIGN.md §6.9)
+python evaluation/ablation_study.py                # does each correction layer earn its keep? (DESIGN.md §6.8)
+python evaluation/seed_sensitivity.py              # retrains at 5 seeds — is the story seed-dependent? (~3 min)
+python evaluation/rolling_backtest.py              # 4-fold walk-forward backtest (~3 min)
+python evaluation/price_demand_eda.py              # what price signal (if any) exists in this data? (DESIGN.md §6.10)
 ```
 
 Run everything from the repo root (module form `python -m src.train`, not `python src/train.py`, since the package uses relative imports).
 
 ```bash
 pip install -r requirements-dev.txt   # fastapi/uvicorn, pytest, ruff, pip-audit, notebook tooling
-pytest -q --cov=src --cov-report=term-missing  # 44 tests, ~15s, 94% coverage — synthetic fixture, never the real data
+pytest -q --cov=src --cov-report=term-missing  # 46 tests, ~30s, 93-94% coverage — synthetic fixture, never the real data
 ruff check src tests                   # lint
 pip-audit -r requirements.txt -r requirements-dev.txt  # dependency vulnerability scan
 uvicorn src.api:app --reload           # serve locally without Docker
@@ -107,7 +112,7 @@ On Windows with Git Bash specifically: prefix `docker run` with `MSYS_NO_PATHCON
 - **`predict_booking_curve(hotel_id, room_type_code, stay_date, as_of_date=None)`** exactly as specified (`src/predict.py`), including full `as_of_date` support: past checkpoints are returned as exact realized fractions from `reservations.csv`, future checkpoints are model-forecast and rescaled to connect continuously to the realized anchor (see the module docstring for the math). `as_of_date=None` is the blind ex-ante forecast used to generate `evaluation/predictions.json`, so the model is compared to the baseline and production curve on equal footing (none of them get to see realized pickup either).
 - **Two-stage model** (`src/model.py`): final-occupancy "level" + booking-pace "shape" (monotonic-constrained in `cp` by construction), combined and then run through a hard constraint-enforcement layer (clip + cumulative-max) that guarantees zero bound/monotonicity violations regardless of what the model produced upstream.
 - **Per-hotel partial pooling** via empirical-Bayes shrinkage on both stages — the mechanism that also answers cold start (§6.1/§6.2 of `DESIGN.md`).
-- **Prediction intervals** (P10/P50/P90) via quantile LightGBM, conformally calibrated from out-of-fold residuals. In-distribution OOF coverage is 90%; true test-window coverage is honestly reported at 39.3% with a root-cause diagnosis (see `DESIGN.md` §6.7) — computed by `evaluation/interval_metrics.py`, checked into this repo, not a number asserted in prose. I chose to report this rather than hand-tune the interval to the test outcomes.
+- **Prediction intervals** (P10/P50/P90) via quantile LightGBM, conformally calibrated from out-of-fold residuals. In-distribution OOF coverage is 90%; true test-window coverage is honestly reported at 62.4% with a root-cause diagnosis (see `DESIGN.md` §6.7/§6.8) — computed by `evaluation/interval_metrics.py`, checked into this repo, not a number asserted in prose. I chose to report this rather than hand-tune the interval to the test outcomes.
 - **Shared feature code** (`src/features.py`) used identically by training and inference — the actual mechanism against train/serve skew, not a claim.
 - **A data-quality fix I found, not one I was told about**: `reservations.csv` references 4 `room_type_code`s (655 + 536 reservations on hotel_C alone — not a rounding error) that don't exist in `room_types.csv`. Without patching this, ~24% of the real test-window curves are silently dropped from evaluation. `src/data.py::_repair_missing_room_types` detects and patches this (inferring inventory from peak concurrent bookings) and logs it loudly rather than failing silently.
 - **`evaluation/compare_production.py`**: an honest three-way comparison (ours / baseline / Ampliphi's own production curve) that plain `evaluate.py` doesn't give you out of the box.
@@ -128,7 +133,7 @@ Two rounds so far, each triggered by asking "what's still missing?" and then act
 **Round 2 — a second "what's still missing?" pass, closing what it found:**
 
 - **`scripts/generate_demo_data.py`**: the gap behind "I can't see the output without the real data." Writes a synthetic dataset with the same schema (shared generator with the test fixture — `src/demo_data.py` — so they can't drift apart), and prints the exact commands to train, predict for a real hotel *and* for `hotel_Z` (which appears nowhere in the dataset — the true cold-start path), and serve it. Every command in its printed output was actually run to confirm it works verbatim, not just written.
-- **`evaluation/interval_metrics.py`**: the PICP/pinball-loss numbers in DESIGN.md §6.7 were originally produced by a throwaway analysis script that was never committed — the claim wasn't actually reproducible from this repo. This is that script, for real, checked in with its output (`evaluation/interval_metrics.json`). Writing it for real caught a bug the throwaway version had papered over (a dict keyed inconsistently by quantile name vs. quantile value) — fixed, then re-verified the number it produces (39.3%) matches what was already in the docs, and surfaced a new finding along the way: `hotel_H`'s miscalibration is almost entirely one-directional (0% below p10, 61.2% above p90), which is *more* consistent with "one-directional level bias from an unseen season" than generic noise would be — now in DESIGN.md §6.7.
+- **`evaluation/interval_metrics.py`**: the PICP/pinball-loss numbers in DESIGN.md §6.7 were originally produced by a throwaway analysis script that was never committed — the claim wasn't actually reproducible from this repo. This is that script, for real, checked in with its output (`evaluation/interval_metrics.json`). Writing it for real caught a bug the throwaway version had papered over (a dict keyed inconsistently by quantile name vs. quantile value) — fixed, then surfaced a new finding along the way: `hotel_H`'s miscalibration was almost entirely one-directional (0% below p10, 61.2% above p90), which is *more* consistent with "one-directional level bias from an unseen season" than generic noise would be. That finding is what led directly to the extrapolation-correction-damping fix in DESIGN.md §6.8, after which the same number reads 62.4% (was 39.3%) — still one-sided, no longer nearly this bad.
 - **`tests/test_api.py`** (12 tests) and **`tests/test_model_batch.py`** (3 tests): the FastAPI service was previously verified only by hand with `curl`, and `predict_curve_batch` — the vectorized path that actually produces `evaluation/predictions.json` — had zero test coverage despite being the code path behind the graded deliverable. The batch test's most important assertion: it agrees with the per-row path the live API serves, checkpoint for checkpoint, quantile for quantile — if those two ever silently diverged, predictions.json would stop reflecting what the service actually serves.
 - **Coverage measured, not guessed**: 94% (`pytest --cov=src`), up from an unmeasured baseline — `src/model.py` and `src/registry.py` are at 100%.
 - **Dependency vulnerability scanning** (`pip-audit`, now in CI) — clean on both `requirements.txt` and `requirements-dev.txt` as of this writing, and now checked on every push, not just once by hand.
@@ -140,14 +145,25 @@ Two rounds so far, each triggered by asking "what's still missing?" and then act
 - **`pre-commit` config**, scoped to match CI exactly (`ruff check` on `src`/`tests`, excluding notebooks and the byte-identical copy of Ampliphi's own `evaluate.py`) — deliberately *not* running an opinionated auto-formatter, which would have rewritten most of the repo for whitespace with no correctness value and fought the comments-next-to-code style used throughout. Consistency with CI was a deliberate choice, checked by actually running it, not assumed from the YAML.
 - **Branch protection on `main`** (required status checks: `lint-and-test`, `docker-build-and-smoke-test`; no force-push, no deletion) and a **`CODEOWNERS`** file.
 
-**What's still genuinely missing**, stated plainly rather than left implicit: no database (everything is local files — fine at this scale, not at "hundreds of hotels"), no message queue / scheduler / actual deployment anywhere, no auth beyond the placeholder header check, no metrics/tracing endpoint, no CORS or rate limiting, no automated retraining schedule, no monitoring or drift detection actually wired up (DESIGN.md §6.5/§6.6 describe what I'd build; none of it runs), no load testing, no secrets management, no API versioning, no multi-stage Docker build (checked whether one would help — it wouldn't: every heavy dependency here is a prebuilt wheel, nothing compiled to shed at a build stage). The registry and hardened API are real, working mechanics; they are not a production deployment.
+**Round 3 — the modeling-judgment gaps a "what's still missing?" pass doesn't surface, because they're not engineering checklist items:**
+
+Full detail in `DESIGN.md` §6.8–§6.11; the headline is that this round found a real bug the earlier rounds couldn't have, because it required a technique (ablation) none of the earlier passes used. Summary:
+
+- **Hierarchical (hotel → room_type) pooling**, gated by a curve-count floor chosen from this dataset's own structure, not tuned against test MAE (§6.8).
+- **Inventory quantization**: occupancy is discrete (`booked/inventory_count`), not continuous, for the 44% of hotel_C's room-type-nights with inventory ≤ 2 — the single biggest lever in this round, −6.4% weighted MAE on its own (§6.8).
+- **A real bug found by ablation, not assumed away**: the honestly-cross-validated per-hotel correction was, on its own, making test performance *worse* than no correction at all — because this dataset's entire train window sits before its entire test window, so every test prediction was silently "extrapolation." Fixed by damping the correction (not just widening the interval) the same way `_extrapolation_widen` already damps for exactly this case (§6.8). This also fixed most of the interval-coverage gap in `evaluation/interval_metrics.py` (39.3% → 62.4% PICP) as a side effect of fixing the point estimate, not a separate tuning pass.
+- **Statistical rigor on the "beats baseline" claim**: a cluster bootstrap (not a naive one — see §6.9 for why), a 5-seed sensitivity check, and a 4-fold walk-forward backtest, all checked into `evaluation/` and reproducible, not asserted.
+- **A price-demand EDA that didn't exist before**, appropriate to a Pricing Intelligence role — and an honest negative result: hotel_H has no price data anywhere in this dataset, and hotel_C's price-occupancy correlation is too weak and too confounded by demand-responsive pricing to support an elasticity claim (§6.10).
+- **An explicit GO/NO-GO recommendation** (§6.11) — qualified GO on the point forecast for human-reviewed pricing, NO-GO on automating yield off the interval or using price as a feature, with the specific bar for revisiting each.
+
+**What's still genuinely missing**, stated plainly rather than left implicit: no database (everything is local files — fine at this scale, not at "hundreds of hotels"), no message queue / scheduler / actual deployment anywhere, no auth beyond a placeholder API-key header check, no automated retraining schedule, no monitoring or drift detection actually wired up (DESIGN.md §6.5/§6.6 describe what I'd build; none of it runs), no secrets management, no multi-stage Docker build (checked whether one would help — it wouldn't: every heavy dependency here is a prebuilt wheel, nothing compiled to shed at a build stage). `/v1/booking-curve` versioning, Prometheus `/metrics`, and in-process rate limiting (`slowapi`) *are* implemented — see `src/api.py` — but rate limiting is per-process/in-memory (no shared store across replicas) and there's no CORS policy configured. `scripts/load_test.py` measured real p50≈2s/p95≈7-8s under 20 concurrent requests against the live per-row API path — likely ~13 sequential LightGBM calls per request vs. the batched path `predictions.json` actually uses — diagnosed, not yet fixed. The registry and hardened API are real, working mechanics; they are not a production deployment.
 
 ## What I'd build next
 
-- A real `season_calendar` feature and cross-hotel-family conformal calibration — the two structural fixes for the hotel_H gap, both blocked on data this dataset doesn't include (see `DESIGN.md` §6.2/§6.7).
+- A real `season_calendar` feature and cross-hotel-family conformal calibration — the two structural fixes for the hotel_H gap that extrapolation-correction damping (§6.8) only partially closes (see `DESIGN.md` §6.2/§6.7/§6.8).
 - Model-based (not just peak-concurrent-inferred) inventory reconciliation for the 4 orphaned room types, ideally by escalating the dimension-table gap upstream instead of silently patching it.
-- A real off-policy evaluation of `suggested_prices` as the historical action — flagged in `DESIGN.md` §6.3 for why I'd want it gated behind more validation-window data first.
-- Real cloud auth, a database, and monitoring in place of the current placeholders (see "What's still genuinely missing" above).
+- Genuine price experimentation data (or an instrument) — §6.10 found the existing `suggested_prices` history can't support a real elasticity estimate (too small, and confounded by the pricer's own demand-responsiveness); the switchback in §6.6 would start generating exactly that data if it were live.
+- Real cloud auth, a database, and monitoring in place of the current placeholders (see "What's still genuinely missing" above); a shared (not in-process) rate-limit store once this runs on more than one replica.
 
 ## Data
 

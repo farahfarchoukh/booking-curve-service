@@ -1,0 +1,147 @@
+{
+  "cat_categories": {
+    "country": [
+      "AU",
+      "CA",
+      "MX",
+      "NZ",
+      "US",
+      "unknown"
+    ],
+    "currency": [
+      "AUD",
+      "CAD",
+      "MXN",
+      "NZD",
+      "USD",
+      "unknown"
+    ],
+    "pms_type": [
+      "agora",
+      "cms",
+      "unknown"
+    ],
+    "primary_rate_mode": [
+      "average",
+      "lowest",
+      "unknown"
+    ],
+    "region_type": [
+      "regional",
+      "resort_coastal",
+      "resort_mountain",
+      "unknown",
+      "urban_core",
+      "urban_outer"
+    ],
+    "room_type_kind": [
+      "derived",
+      "optimized",
+      "unknown"
+    ]
+  },
+  "level_shrink": {
+    "hotel_C": -0.059061524870599846,
+    "hotel_H": -0.16414844849332424
+  },
+  "shape_shrink": {
+    "hotel_C": 0.0014548551535808842,
+    "hotel_H": -0.04966477483561012
+  },
+  "level_shrink_k": 15.0,
+  "shape_shrink_k": 30.0,
+  "hotel_n_obs": {
+    "hotel_C": 1463,
+    "hotel_H": 40
+  },
+  "interval_widen_k": 1.5,
+  "room_level_shrink": {
+    "hotel_C|rt_11ef219078": 0.02033499296582151,
+    "hotel_C|rt_15039fbf2f": 0.024027067185488263,
+    "hotel_C|rt_19bd5f34e9": -0.07156365873557086,
+    "hotel_C|rt_31055626e9": 0.029406603109585035,
+    "hotel_C|rt_3ab5c1336a": 0.06555685548945002,
+    "hotel_C|rt_3be952e9e8": -0.05357910687755307,
+    "hotel_C|rt_3f17579544": 0.006113480856712393,
+    "hotel_C|rt_43c1dff4be": -0.05198599724123965,
+    "hotel_C|rt_5905d4dbfb": -0.02630662374416139,
+    "hotel_C|rt_7831e58e17": 0.05802255815522889,
+    "hotel_C|rt_b186ccae78": 0.017118920976228597,
+    "hotel_C|rt_d47423c827": -0.03305788864370507,
+    "hotel_C|rt_e6e5881b76": 0.05505288291046304,
+    "hotel_C|rt_ea30c05c4c": 0.027501636911616632,
+    "hotel_C|rt_ec8321450f": 0.0097308737417737,
+    "hotel_C|rt_f26bca1124": -0.026111669089628992,
+    "hotel_C|rt_f9f1c41d60": -0.0534665941962396
+  },
+  "room_shape_shrink": {
+    "hotel_C|rt_11ef219078": -0.0030016328576742647,
+    "hotel_C|rt_15039fbf2f": -0.005379521813380758,
+    "hotel_C|rt_19bd5f34e9": -0.024943886469623786,
+    "hotel_C|rt_31055626e9": -0.012431688725093268,
+    "hotel_C|rt_3ab5c1336a": 0.006037008231753822,
+    "hotel_C|rt_3be952e9e8": -0.017853568120603396,
+    "hotel_C|rt_3f17579544": 0.03708174023091657,
+    "hotel_C|rt_43c1dff4be": -0.009437221222209097,
+    "hotel_C|rt_5905d4dbfb": 0.0030822812321465638,
+    "hotel_C|rt_7831e58e17": -0.009723160161450518,
+    "hotel_C|rt_b186ccae78": -0.020682710410743967,
+    "hotel_C|rt_d47423c827": 0.04050073175811437,
+    "hotel_C|rt_e6e5881b76": 0.022652676391199684,
+    "hotel_C|rt_ea30c05c4c": 0.008641575015473999,
+    "hotel_C|rt_ec8321450f": 0.005335907855257319,
+    "hotel_C|rt_f26bca1124": 0.002903653755524236,
+    "hotel_C|rt_f9f1c41d60": -0.021988678500774454
+  },
+  "room_level_shrink_k": 20.0,
+  "room_shape_shrink_k": 40.0,
+  "room_n_obs": {
+    "hotel_C|rt_11ef219078": 93,
+    "hotel_C|rt_15039fbf2f": 91,
+    "hotel_C|rt_19bd5f34e9": 86,
+    "hotel_C|rt_31055626e9": 93,
+    "hotel_C|rt_3ab5c1336a": 77,
+    "hotel_C|rt_3be952e9e8": 88,
+    "hotel_C|rt_3f17579544": 91,
+    "hotel_C|rt_43c1dff4be": 82,
+    "hotel_C|rt_5905d4dbfb": 82,
+    "hotel_C|rt_7831e58e17": 76,
+    "hotel_C|rt_b186ccae78": 90,
+    "hotel_C|rt_d47423c827": 85,
+    "hotel_C|rt_e6e5881b76": 79,
+    "hotel_C|rt_ea30c05c4c": 90,
+    "hotel_C|rt_ec8321450f": 87,
+    "hotel_C|rt_f26bca1124": 91,
+    "hotel_C|rt_f9f1c41d60": 82,
+    "hotel_H|rt_066f015826": 14,
+    "hotel_H|rt_1257a1c92b": 15,
+    "hotel_H|rt_3326f7bf22": 7,
+    "hotel_H|rt_38732925ca": 1,
+    "hotel_H|rt_c85cf59a2e": 1,
+    "hotel_H|rt_d0c1728ec2": 2
+  },
+  "level_q_shift": {
+    "0.1": -0.008168586589596388,
+    "0.5": 0.0,
+    "0.9": 0.0
+  },
+  "train_doy_range": [
+    88,
+    181
+  ],
+  "extrapolation_gamma": 1.0,
+  "quantiles": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "extra": {
+    "level_rounds": 75,
+    "shape_rounds": 53,
+    "train_end": "2025-06-30",
+    "val_start": "2025-06-09",
+    "n_level_rows": 1503,
+    "n_shape_rows": 13527,
+    "seed": 42
+  }
+}

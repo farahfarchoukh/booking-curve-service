@@ -1,0 +1,22 @@
+{
+  "Own price level vs final occupancy": {
+    "n": 323,
+    "spearman_rho": 0.0787676544291787,
+    "p_value": 0.15785132236892574
+  },
+  "Price relative to same-night competitor median vs final occupancy": {
+    "n": 281,
+    "spearman_rho": -0.04250208881132509,
+    "p_value": 0.477946184919756
+  },
+  "pricer_type=derived": {
+    "n": 299,
+    "spearman_rho": 0.09752374422023534,
+    "p_value": 0.09231812610854832
+  },
+  "pricer_type=optimized": {
+    "n": 24,
+    "spearman_rho": 0.526250183650044,
+    "p_value": 0.008252302211907689
+  }
+}

@@ -29,6 +29,29 @@ own history gets most of its own signal back; a brand-new hotel (n=0) gets
 exactly the global backbone prediction, which is what makes this the same
 mechanism that answers the cold-start question in §6.2.
 
+This pooling is actually two nested levels, not one. A hotel's room types
+are not exchangeable with each other: within a hotel, the "optimized" base
+room type is priced first and every "derived" room type is a fixed or
+near-fixed delta off it (see DESIGN.md §6.1), so derived rooms' occupancy
+is mechanically correlated with their hotel's base room, not just with
+"hotels in general." A single hotel-level scalar throws that signal away —
+it corrects "hotel_C runs 4pp hot" but not "hotel_C's largest suite runs
+9pp cold relative even to hotel_C's own average." So the correction is
+applied in two passes, backbone -> hotel -> (hotel, room_type): first the
+existing per-hotel correction, exactly as before; then a second,
+independent empirical-Bayes correction fit on the RESIDUAL that remains
+after the hotel-level correction, grouped by (hotel_id, room_type_code)
+and shrunk toward zero by that room type's own curve count (`n_room /
+(n_room + K_room)`). A room type with plenty of its own history (the base
+"optimized" type, usually) gets most of that residual signal back; a
+derived type with only a handful of curves gets shrunk almost entirely
+back to its hotel's correction, which is exactly the fallback a brand-new
+room type in a known hotel should get. This is still not a joint
+hierarchical model (the two levels are fit sequentially on residuals, not
+jointly), but it is the natural two-level extension of the same
+mechanism, and it costs one more small dict, not a different
+architecture.
+
 All prediction paths funnel through `predict_curve`, so train-time
 evaluation and serve-time inference always use the same code — this is the
 "train/serve skew" requirement from README §8 / DESIGN.md §6.5.
@@ -72,8 +95,45 @@ def enforce_curve_constraints(cp_list, values) -> dict:
     return {str(int(cp)): float(val) for cp, val in zip(cps, out)}
 
 
+MAX_INVENTORY_FOR_QUANTIZATION = 3
+
+
+def quantize_curve_to_inventory(curve: dict, inventory_count: int | None) -> dict:
+    """Occupancy at every checkpoint is `booked_rooms / inventory_count` —
+    an integer over an integer, not a free continuous quantity. For most
+    room types inventory_count is large enough that this is a fine detail
+    (nearest achievable value to any model output is close by). It stops
+    being a fine detail once inventory_count is tiny: with inventory=1 the
+    only achievable values are {0, 1}; with inventory=2, {0, 0.5, 1}. In
+    this dataset 44% of hotel_C's room-type-nights have inventory <= 2 —
+    that's not an edge case to shrug off, it's most of one hotel's rooms.
+    A raw regression output like 0.34 for an inventory=1 room isn't a
+    plausible prediction of anything real; it can only ever be 0 or 1.
+
+    Snaps every checkpoint to its nearest achievable k/inventory_count,
+    only when inventory_count is known and small (large-inventory rooms
+    are already effectively continuous — snapping them buys nothing and
+    risks quietly nudging a well-calibrated prediction). Caller is
+    responsible for re-enforcing monotonicity afterward: rounding two
+    adjacent checkpoints independently can occasionally flatten or
+    reverse their order even though the pre-quantized values were
+    correctly ordered.
+    """
+    if not inventory_count or inventory_count > MAX_INVENTORY_FOR_QUANTIZATION:
+        return dict(curve)
+    step = 1.0 / inventory_count
+    return {cp: round(round(v / step) * step, 10) for cp, v in curve.items()}
+
+
 def _shrink_weight(n: int, k: float) -> float:
     return n / (n + k) if (n + k) > 0 else 0.0
+
+
+def room_key(hotel_id: str, room_type_code: str) -> str:
+    """Composite key for the second (finer) pooling level. A plain string
+    join, not a tuple, because this dict round-trips through JSON
+    (meta.json) where tuple keys don't exist."""
+    return f"{hotel_id}|{room_type_code}"
 
 
 class BookingCurveModel:
@@ -89,6 +149,11 @@ class BookingCurveModel:
         shape_shrink_k: float,
         hotel_n_obs: dict[str, int],
         interval_widen_k: float,
+        room_level_shrink: dict[str, float] | None = None,
+        room_shape_shrink: dict[str, float] | None = None,
+        room_level_shrink_k: float = 20.0,
+        room_shape_shrink_k: float = 40.0,
+        room_n_obs: dict[str, int] | None = None,
         level_q_shift: dict[float, float] | None = None,
         train_doy_range: tuple[int, int] = (1, 366),
         extrapolation_gamma: float = 0.0,
@@ -104,6 +169,13 @@ class BookingCurveModel:
         self.shape_shrink_k = shape_shrink_k
         self.hotel_n_obs = hotel_n_obs
         self.interval_widen_k = interval_widen_k
+        # second (finer) pooling level: (hotel, room_type) correction on top
+        # of the hotel-level one — see module docstring.
+        self.room_level_shrink = room_level_shrink or {}
+        self.room_shape_shrink = room_shape_shrink or {}
+        self.room_level_shrink_k = room_level_shrink_k
+        self.room_shape_shrink_k = room_shape_shrink_k
+        self.room_n_obs = room_n_obs or {}
         self.level_q_shift = level_q_shift or {0.1: 0.0, 0.5: 0.0, 0.9: 0.0}
         self.train_doy_range = tuple(train_doy_range)
         self.extrapolation_gamma = extrapolation_gamma
@@ -123,6 +195,33 @@ class BookingCurveModel:
         lo, hi = self.train_doy_range
         dist = np.maximum(0, np.maximum(doy - hi, lo - doy))
         return 1.0 + self.extrapolation_gamma * (dist / 30.0)
+
+    def _extrapolation_correction_damp(self, stay_dates) -> np.ndarray:
+        """How much to trust the OOF-fit per-hotel/room-type CORRECTION
+        (not just how much to widen the interval around it) for a stay
+        date outside the training season.
+
+        This exists because of a real ablation finding, not a hunch: the
+        per-hotel correction is fit honestly via in-sample OOF
+        cross-validation, but this dataset's entire train window
+        (Mar-Jun) sits before its entire test window (Jul-Sep) — every
+        single test prediction is "extrapolation" by the definition
+        above. evaluation/ablation_study.py shows the correction applied
+        at full strength there makes test weighted MAE WORSE than no
+        correction at all (0.306 vs 0.271) — most sharply for hotel_H,
+        whose correction was learned from its Mar-Jun ramp-up period and
+        doesn't describe its unseen Jul-Sep peak season. A bias learned
+        from one season is exactly the kind of thing that shouldn't be
+        assumed to hold in a season the model has never seen.
+
+        Deliberately reuses `_extrapolation_widen`'s own distance
+        computation rather than introducing a second, separately-tuned
+        decay constant: as the interval widens by a factor W to express
+        "we don't know this regime," trust in the correction shrinks by
+        1/W for the same reason. At dist=0 (in-season) this is exactly
+        1.0 — in-season behavior is completely unchanged by this fix.
+        """
+        return 1.0 / self._extrapolation_widen(stay_dates)
 
     # ---- feature prep -----------------------------------------------
     def _fix_categories(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -160,12 +259,36 @@ class BookingCurveModel:
     def hotel_shrink_weight_shape(self, hotel_id: str) -> float:
         return _shrink_weight(self.hotel_n_obs.get(hotel_id, 0), self.shape_shrink_k)
 
+    def room_shrink_weight_level(self, hotel_id: str, room_type_code: str) -> float:
+        n = self.room_n_obs.get(room_key(hotel_id, room_type_code), 0)
+        return _shrink_weight(n, self.room_level_shrink_k)
+
+    def room_shrink_weight_shape(self, hotel_id: str, room_type_code: str) -> float:
+        n = self.room_n_obs.get(room_key(hotel_id, room_type_code), 0)
+        return _shrink_weight(n, self.room_shape_shrink_k)
+
+    def _level_correction(self, hotel_id: str, room_type_code: str) -> float:
+        """Nested correction: hotel-level term plus a second (hotel,
+        room_type) term fit on what the hotel-level term left behind. A
+        room type with no history of its own (room_n_obs == 0, e.g. a
+        brand-new derived type) contributes exactly 0 here and falls back
+        to the hotel-level correction alone."""
+        hotel_corr = self.level_shrink.get(hotel_id, 0.0)
+        room_corr = self.room_level_shrink.get(room_key(hotel_id, room_type_code), 0.0)
+        return hotel_corr + room_corr
+
+    def _shape_correction(self, hotel_id: str, room_type_code: str) -> float:
+        hotel_corr = self.shape_shrink.get(hotel_id, 0.0)
+        room_corr = self.room_shape_shrink.get(room_key(hotel_id, room_type_code), 0.0)
+        return hotel_corr + room_corr
+
     def _corrected_level(self, static, hotel_id: str, room_type_code: str, stay_date) -> float:
         row = pd.DataFrame(
             {"hotel_id": [hotel_id], "room_type_code": [room_type_code], "stay_date": [stay_date]}
         )
         raw = float(self.predict_level_raw(static, row)[0])
-        corr = self.level_shrink.get(hotel_id, 0.0)
+        damp = float(self._extrapolation_correction_damp(pd.Series([stay_date]))[0])
+        corr = self._level_correction(hotel_id, room_type_code) * damp
         return float(np.clip(raw + corr, 0.0, 1.0))
 
     def _corrected_level_quantiles(self, static, hotel_id, room_type_code, stay_date) -> dict:
@@ -173,7 +296,8 @@ class BookingCurveModel:
             {"hotel_id": [hotel_id], "room_type_code": [room_type_code], "stay_date": [stay_date]}
         )
         raw = self.predict_level_quantiles_raw(static, row)
-        corr = self.level_shrink.get(hotel_id, 0.0)
+        damp = float(self._extrapolation_correction_damp(pd.Series([stay_date]))[0])
+        corr = self._level_correction(hotel_id, room_type_code) * damp
         n = self.hotel_n_obs.get(hotel_id, 0)
         widen = (1.0 + self.interval_widen_k / np.sqrt(n + 1)) * float(
             self._extrapolation_widen(pd.Series([stay_date]))[0]
@@ -200,7 +324,8 @@ class BookingCurveModel:
             }
         )
         raw = self.predict_shape_raw(static, rows)
-        corr = self.shape_shrink.get(hotel_id, 0.0)
+        damp = float(self._extrapolation_correction_damp(pd.Series([stay_date]))[0])
+        corr = self._shape_correction(hotel_id, room_type_code) * damp
         g = np.clip(raw + corr, 0.0, 1.0)
         g_dict = {cp: float(v) for cp, v in zip(NONZERO_CHECKPOINTS, g)}
         g_dict[0] = 1.0
@@ -209,6 +334,30 @@ class BookingCurveModel:
         cps_sorted = np.array(CHECKPOINTS)[order]
         vals_sorted = np.maximum.accumulate([g_dict[c] for c in cps_sorted])
         return {int(c): float(v) for c, v in zip(cps_sorted, vals_sorted)}
+
+    @staticmethod
+    def _quantize_all(point: dict, intervals: dict, inventory_count) -> tuple[dict, dict]:
+        """Applies quantize_curve_to_inventory to point + all three
+        interval curves, then re-runs enforce_curve_constraints on each
+        (quantizing independently per checkpoint can occasionally unorder
+        two adjacent values), then restores p10<=p50<=p90 one more time
+        for the same reason. A no-op when inventory_count is unknown or
+        above MAX_INVENTORY_FOR_QUANTIZATION — quantize_curve_to_inventory
+        itself is the single point of truth for that threshold."""
+        if not inventory_count or inventory_count > MAX_INVENTORY_FOR_QUANTIZATION:
+            return point, intervals
+
+        def _requantize(curve: dict) -> dict:
+            q = quantize_curve_to_inventory(curve, inventory_count)
+            return enforce_curve_constraints(CHECKPOINTS, [q[str(cp)] for cp in CHECKPOINTS])
+
+        point = _requantize(point)
+        intervals = {k: _requantize(v) for k, v in intervals.items()}
+        for cp in map(str, CHECKPOINTS):
+            lo, med, hi = intervals["p10"][cp], intervals["p50"][cp], intervals["p90"][cp]
+            lo, med, hi = sorted([lo, med, hi])
+            intervals["p10"][cp], intervals["p50"][cp], intervals["p90"][cp] = lo, med, hi
+        return point, intervals
 
     def predict_curve(self, static, hotel_id: str, room_type_code: str, stay_date) -> dict:
         """Full blind (no as_of anchoring) predicted curve, constraint-
@@ -230,13 +379,23 @@ class BookingCurveModel:
             lo, med, hi = sorted([lo, med, hi])
             intervals["p10"][cp], intervals["p50"][cp], intervals["p90"][cp] = lo, med, hi
 
+        inv = static.inventory_lookup.get((hotel_id, room_type_code))
+        point, intervals = self._quantize_all(point, intervals, inv)
+
         n_obs = self.hotel_n_obs.get(hotel_id, 0)
+        room_n = self.room_n_obs.get(room_key(hotel_id, room_type_code), 0)
         diagnostics = {
             "final_occupancy_hat": y_final,
             "hotel_n_train_obs": n_obs,
             "level_shrink_weight": self.hotel_shrink_weight_level(hotel_id),
             "shape_shrink_weight": self.hotel_shrink_weight_shape(hotel_id),
             "known_hotel": hotel_id in self.hotel_n_obs,
+            "room_type_n_train_obs": room_n,
+            "room_level_shrink_weight": self.room_shrink_weight_level(hotel_id, room_type_code),
+            "room_shape_shrink_weight": self.room_shrink_weight_shape(hotel_id, room_type_code),
+            "known_room_type": room_key(hotel_id, room_type_code) in self.room_n_obs,
+            "inventory_count": inv,
+            "inventory_quantized": bool(inv) and inv <= MAX_INVENTORY_FOR_QUANTIZATION,
         }
         return {"point": point, **intervals, "diagnostics": diagnostics}
 
@@ -253,9 +412,18 @@ class BookingCurveModel:
         keys = keys.reset_index(drop=True)
         n = len(keys)
         hotel_ids = keys["hotel_id"].tolist()
+        room_types = keys["room_type_code"].tolist()
+        room_keys = [room_key(h, r) for h, r in zip(hotel_ids, room_types)]
 
         level_raw = self.predict_level_raw(static, keys)
-        level_corr = np.array([self.level_shrink.get(h, 0.0) for h in hotel_ids])
+        level_corr_raw = np.array(
+            [
+                self.level_shrink.get(h, 0.0) + self.room_level_shrink.get(rk, 0.0)
+                for h, rk in zip(hotel_ids, room_keys)
+            ]
+        )
+        damp = self._extrapolation_correction_damp(keys["stay_date"])
+        level_corr = level_corr_raw * damp
         y_final = np.clip(level_raw + level_corr, 0.0, 1.0)
 
         q_raw = self.predict_level_quantiles_raw(static, keys)
@@ -274,7 +442,17 @@ class BookingCurveModel:
         rep = keys.loc[keys.index.repeat(len(NONZERO_CHECKPOINTS))].reset_index(drop=True)
         rep["cp"] = NONZERO_CHECKPOINTS * n
         shape_raw = self.predict_shape_raw(static, rep)
-        shape_corr = np.array([self.shape_shrink.get(h, 0.0) for h in rep["hotel_id"]])
+        rep_room_keys = [
+            room_key(h, r) for h, r in zip(rep["hotel_id"], rep["room_type_code"])
+        ]
+        shape_corr_raw = np.array(
+            [
+                self.shape_shrink.get(h, 0.0) + self.room_shape_shrink.get(rk, 0.0)
+                for h, rk in zip(rep["hotel_id"], rep_room_keys)
+            ]
+        )
+        shape_damp = self._extrapolation_correction_damp(rep["stay_date"])
+        shape_corr = shape_corr_raw * shape_damp
         g_flat = np.clip(shape_raw + shape_corr, 0.0, 1.0).reshape(n, len(NONZERO_CHECKPOINTS))
 
         results = []
@@ -298,12 +476,22 @@ class BookingCurveModel:
                 a, b, c = sorted([a, b, c])
                 intervals["p10"][cp], intervals["p50"][cp], intervals["p90"][cp] = a, b, c
 
+            inv = static.inventory_lookup.get((hotel_ids[i], room_types[i]))
+            point, intervals = self._quantize_all(point, intervals, inv)
+
+            room_n_i = self.room_n_obs.get(room_keys[i], 0)
             diagnostics = {
                 "final_occupancy_hat": float(y_final[i]),
                 "hotel_n_train_obs": int(n_obs[i]),
                 "level_shrink_weight": self.hotel_shrink_weight_level(hotel_ids[i]),
                 "shape_shrink_weight": self.hotel_shrink_weight_shape(hotel_ids[i]),
                 "known_hotel": hotel_ids[i] in self.hotel_n_obs,
+                "room_type_n_train_obs": room_n_i,
+                "room_level_shrink_weight": self.room_shrink_weight_level(hotel_ids[i], room_types[i]),
+                "room_shape_shrink_weight": self.room_shrink_weight_shape(hotel_ids[i], room_types[i]),
+                "known_room_type": room_keys[i] in self.room_n_obs,
+                "inventory_count": inv,
+                "inventory_quantized": bool(inv) and inv <= MAX_INVENTORY_FOR_QUANTIZATION,
             }
             results.append({"point": point, **intervals, "diagnostics": diagnostics})
         return results
@@ -324,6 +512,11 @@ class BookingCurveModel:
             "shape_shrink_k": self.shape_shrink_k,
             "hotel_n_obs": self.hotel_n_obs,
             "interval_widen_k": self.interval_widen_k,
+            "room_level_shrink": self.room_level_shrink,
+            "room_shape_shrink": self.room_shape_shrink,
+            "room_level_shrink_k": self.room_level_shrink_k,
+            "room_shape_shrink_k": self.room_shape_shrink_k,
+            "room_n_obs": self.room_n_obs,
             "level_q_shift": self.level_q_shift,
             "train_doy_range": list(self.train_doy_range),
             "extrapolation_gamma": self.extrapolation_gamma,
@@ -355,6 +548,11 @@ class BookingCurveModel:
             shape_shrink_k=meta["shape_shrink_k"],
             hotel_n_obs=meta["hotel_n_obs"],
             interval_widen_k=meta["interval_widen_k"],
+            room_level_shrink=meta.get("room_level_shrink", {}),
+            room_shape_shrink=meta.get("room_shape_shrink", {}),
+            room_level_shrink_k=meta.get("room_level_shrink_k", 20.0),
+            room_shape_shrink_k=meta.get("room_shape_shrink_k", 40.0),
+            room_n_obs=meta.get("room_n_obs", {}),
             level_q_shift={float(k): v for k, v in meta.get("level_q_shift", {}).items()},
             train_doy_range=tuple(meta.get("train_doy_range", (1, 366))),
             extrapolation_gamma=meta.get("extrapolation_gamma", 0.0),

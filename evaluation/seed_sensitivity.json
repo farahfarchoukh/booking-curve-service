@@ -1,0 +1,51 @@
+{
+  "seeds": [
+    {
+      "seed": 42,
+      "overall_mae": 0.267278,
+      "weighted_mae": 0.265287,
+      "hotel_C_mae": 0.256021,
+      "hotel_H_mae": 0.283627
+    },
+    {
+      "seed": 7,
+      "overall_mae": 0.277281,
+      "weighted_mae": 0.27868,
+      "hotel_C_mae": 0.255657,
+      "hotel_H_mae": 0.308686
+    },
+    {
+      "seed": 123,
+      "overall_mae": 0.263371,
+      "weighted_mae": 0.259275,
+      "hotel_C_mae": 0.257091,
+      "hotel_H_mae": 0.272492
+    },
+    {
+      "seed": 2024,
+      "overall_mae": 0.272557,
+      "weighted_mae": 0.271862,
+      "hotel_C_mae": 0.254678,
+      "hotel_H_mae": 0.298523
+    },
+    {
+      "seed": 90210,
+      "overall_mae": 0.27107,
+      "weighted_mae": 0.269621,
+      "hotel_C_mae": 0.253153,
+      "hotel_H_mae": 0.297091
+    }
+  ],
+  "weighted_mae_mean": 0.268945,
+  "weighted_mae_std": 0.0072564790704583455,
+  "weighted_mae_range": [
+    0.259275,
+    0.27868
+  ],
+  "overall_mae_mean": 0.2703114,
+  "overall_mae_std": 0.0052811974305075815,
+  "overall_mae_range": [
+    0.263371,
+    0.277281
+  ]
+}

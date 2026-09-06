@@ -1,0 +1,10 @@
+{
+  "n_clusters": 32,
+  "n_curves": 2521,
+  "point_estimate_diff": -0.08233710905192698,
+  "our_weighted_mae": 0.26528691580593367,
+  "baseline_weighted_mae": 0.34762402485786065,
+  "ci95_low": -0.11612260050618002,
+  "ci95_high": -0.04961342569517161,
+  "p_value_ours_better": 0.0
+}

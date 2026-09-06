@@ -1,0 +1,30 @@
+[
+  {
+    "variant": "A. backbone only",
+    "overall_mae": 0.274538,
+    "weighted_mae": 0.271323,
+    "hotel_C_mae": 0.273339,
+    "hotel_H_mae": 0.27628
+  },
+  {
+    "variant": "B. + hotel shrink",
+    "overall_mae": 0.285117,
+    "weighted_mae": 0.285139,
+    "hotel_C_mae": 0.277155,
+    "hotel_H_mae": 0.29668
+  },
+  {
+    "variant": "C. + room-type shrink",
+    "overall_mae": 0.284179,
+    "weighted_mae": 0.283866,
+    "hotel_C_mae": 0.275572,
+    "hotel_H_mae": 0.29668
+  },
+  {
+    "variant": "D. + quantization (shipped)",
+    "overall_mae": 0.267278,
+    "weighted_mae": 0.265287,
+    "hotel_C_mae": 0.256021,
+    "hotel_H_mae": 0.283627
+  }
+]

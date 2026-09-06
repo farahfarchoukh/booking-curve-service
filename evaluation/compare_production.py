@@ -66,10 +66,23 @@ def main():
         if p["hotel_id"] == HOTEL and p["room_type_code"] == ROOM
     }
 
-    # heuristic baseline (starter/baseline_model.py output, if present alongside this data dir)
-    baseline_path = ROOT.parent / "ampliphi-ml-takehome-v3" / "evaluation" / "baseline_predictions.json"
+    # heuristic baseline (starter/baseline_model.py output) — lives in the
+    # original take-home starter kit, not this repo (it's Ampliphi's own
+    # script, not ours to vendor in). Its location relative to this repo
+    # isn't fixed by any convention, so check an env var override first,
+    # then the couple of layouts this has actually lived at.
+    import os
+
+    candidates = []
+    if os.environ.get("BASELINE_PREDICTIONS_PATH"):
+        candidates.append(Path(os.environ["BASELINE_PREDICTIONS_PATH"]))
+    candidates += [
+        ROOT.parent / "ampliphi-ml-takehome-v3" / "evaluation" / "baseline_predictions.json",
+        ROOT.parent / "aspire-takehome" / "ampliphi-ml-takehome-v3" / "evaluation" / "baseline_predictions.json",
+    ]
+    baseline_path = next((p for p in candidates if p.exists()), None)
     base_by_date = {}
-    if baseline_path.exists():
+    if baseline_path is not None:
         base_preds = json.load(open(baseline_path))
         base_by_date = {
             p["stay_date"]: {int(k): v for k, v in p["predictions"].items()}
