@@ -12,7 +12,12 @@
 # image that might end up in a registry, and a model artifact should be
 # swappable (a version rollback, a canary) without a rebuild.
 
-FROM python:3.11-slim
+# Pinned by digest, not just the `3.11-slim` tag: a floating tag means a
+# rebuild next month can silently pull a different underlying image (and a
+# different set of OS-level CVEs) than the one this Dockerfile was actually
+# built and verified against. Re-resolve deliberately (`docker pull
+# python:3.11-slim` + update this digest) rather than let it drift.
+FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
 
 WORKDIR /app
 
@@ -38,6 +43,8 @@ RUN pip install --no-cache-dir fastapi==0.141.1 uvicorn==0.52.4 pydantic==2.13.5
 
 COPY src/ src/
 COPY evaluation/evaluate.py evaluation/evaluate.py
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 RUN useradd --create-home --uid 1000 appuser
 USER appuser
@@ -46,4 +53,13 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz', timeout=3).status==200 else 1)"
 
-CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# JSON-array CMD (no shell wrapping) pointing at a script that `exec`s
+# uvicorn, not shell-form CMD directly — see docker-entrypoint.sh for why:
+# shell-form here would swallow SIGTERM on `docker stop` instead of
+# forwarding it, breaking graceful shutdown. A single worker by default
+# (correct for the scale this repo actually runs at), overridable per
+# deployment without a rebuild: `docker run -e WEB_CONCURRENCY=4 ...`.
+# Multiple uvicorn workers each load their own copy of the model (no
+# shared memory) — fine at this model's size (~200KB), worth knowing if
+# that ever changes.
+CMD ["/usr/local/bin/docker-entrypoint.sh"]

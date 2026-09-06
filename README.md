@@ -8,6 +8,20 @@ The interesting part of this problem was never "fit a curve to one hotel's histo
 
 **Start with `DESIGN.md`** for the full engineering rationale, organized by decision (one model or many, cold start, feature provenance, multi-currency handling, serving infrastructure, production evaluation, uncertainty). Second: `src/model.py`'s docstring, which explains the level+shape decomposition everything else hangs off of.
 
+**No access to the real data?** `python -m scripts.generate_demo_data` writes a small synthetic dataset with the same schema and prints the exact commands to train, predict, and serve against it — including a hotel that appears nowhere in the dataset at all, to see the cold-start path return a real answer. See "How to run" below.
+
+```mermaid
+flowchart LR
+    A[Onboarding attributes\n+ calendar\nno hotel_id] --> B[Level model\nfinal occupancy]
+    A --> C[Shape model\npace g(cp), cp monotonic]
+    B --> D["y = level × g(cp)"]
+    C --> D
+    D --> E[Clip + cummax\nconstraint enforcement]
+    E --> F[Booking curve\n0 violations, by construction]
+    G[Per-hotel shrinkage\n+ conformal calibration] -.-> B
+    G -.-> C
+```
+
 ## Where to look first
 
 `evaluation/compare_production.py`'s output below is the fastest way in — it's the one place this model is compared against Ampliphi's own production heuristic, not just an internal baseline, and it's also where the most important honest finding (prediction-interval coverage collapses outside the training season) is easiest to see right next to the win.
@@ -43,8 +57,10 @@ Per-hotel breakdown (`evaluation/results.json`) is worth reading past the headli
 
 ```bash
 pip install -r requirements.txt
-# place Ampliphi's anonymized data extract at ./data, alongside src/ —
-# not included in this repo (see "Data" below)
+# place Ampliphi's anonymized data extract at ./data, alongside src/ — not
+# included in this repo (see "Data" below). No access to it? Run this
+# instead and use its printed commands, pointed at ./demo_data:
+#   python -m scripts.generate_demo_data
 
 python -m src.train                              # trains + saves artifacts/model/<version>/, promotes it
 python -m src.predict --hotel-id hotel_C \
@@ -54,15 +70,18 @@ python -m src.predict --hotel-id hotel_C --room-type-code rt_ea30c05c4c \
 python -m src.predict --generate-eval             # writes evaluation/predictions.json
 python evaluation/evaluate.py --predictions evaluation/predictions.json --data-dir data
 python evaluation/compare_production.py           # vs. baseline + production curve
+python evaluation/interval_metrics.py              # PICP / pinball loss — the source of the numbers in DESIGN.md §6.7
 ```
 
 Run everything from the repo root (module form `python -m src.train`, not `python src/train.py`, since the package uses relative imports).
 
 ```bash
-pip install -r requirements-dev.txt   # fastapi/uvicorn, pytest, ruff, notebook tooling
-pytest -q                              # 29 tests, ~7s, against a synthetic fixture (never the real data)
+pip install -r requirements-dev.txt   # fastapi/uvicorn, pytest, ruff, pip-audit, notebook tooling
+pytest -q --cov=src --cov-report=term-missing  # 44 tests, ~15s, 94% coverage — synthetic fixture, never the real data
 ruff check src tests                   # lint
+pip-audit -r requirements.txt -r requirements-dev.txt  # dependency vulnerability scan
 uvicorn src.api:app --reload           # serve locally without Docker
+pre-commit install                     # optional: run the above lint automatically before each commit
 ```
 
 **Docker** (built and verified end-to-end — see "Engineering hardening"):
@@ -88,25 +107,40 @@ On Windows with Git Bash specifically: prefix `docker run` with `MSYS_NO_PATHCON
 - **`predict_booking_curve(hotel_id, room_type_code, stay_date, as_of_date=None)`** exactly as specified (`src/predict.py`), including full `as_of_date` support: past checkpoints are returned as exact realized fractions from `reservations.csv`, future checkpoints are model-forecast and rescaled to connect continuously to the realized anchor (see the module docstring for the math). `as_of_date=None` is the blind ex-ante forecast used to generate `evaluation/predictions.json`, so the model is compared to the baseline and production curve on equal footing (none of them get to see realized pickup either).
 - **Two-stage model** (`src/model.py`): final-occupancy "level" + booking-pace "shape" (monotonic-constrained in `cp` by construction), combined and then run through a hard constraint-enforcement layer (clip + cumulative-max) that guarantees zero bound/monotonicity violations regardless of what the model produced upstream.
 - **Per-hotel partial pooling** via empirical-Bayes shrinkage on both stages — the mechanism that also answers cold start (§6.1/§6.2 of `DESIGN.md`).
-- **Prediction intervals** (P10/P50/P90) via quantile LightGBM, conformally calibrated from out-of-fold residuals. In-distribution OOF coverage is 90%; true test-window coverage is honestly reported at ~38% with a root-cause diagnosis (see `DESIGN.md` §6.7) — I chose to report this rather than hand-tune the interval to the test outcomes.
+- **Prediction intervals** (P10/P50/P90) via quantile LightGBM, conformally calibrated from out-of-fold residuals. In-distribution OOF coverage is 90%; true test-window coverage is honestly reported at 39.3% with a root-cause diagnosis (see `DESIGN.md` §6.7) — computed by `evaluation/interval_metrics.py`, checked into this repo, not a number asserted in prose. I chose to report this rather than hand-tune the interval to the test outcomes.
 - **Shared feature code** (`src/features.py`) used identically by training and inference — the actual mechanism against train/serve skew, not a claim.
 - **A data-quality fix I found, not one I was told about**: `reservations.csv` references 4 `room_type_code`s (655 + 536 reservations on hotel_C alone — not a rounding error) that don't exist in `room_types.csv`. Without patching this, ~24% of the real test-window curves are silently dropped from evaluation. `src/data.py::_repair_missing_room_types` detects and patches this (inferring inventory from peak concurrent bookings) and logs it loudly rather than failing silently.
 - **`evaluation/compare_production.py`**: an honest three-way comparison (ours / baseline / Ampliphi's own production curve) that plain `evaluate.py` doesn't give you out of the box.
 
 ## Engineering hardening
 
-Everything below was added after a direct "is this actually production-ready?" review — the honest answer at that point was no: DESIGN.md described a production architecture that didn't exist in the code yet. This is what closed that gap, verified rather than assumed:
+Two rounds so far, each triggered by asking "what's still missing?" and then actually closing what came back, rather than leaving it as a list.
+
+**Round 1 — is this production-ready at all:**
 
 - **Determinism, verified by diffing bytes, not by re-reading code.** Retraining on identical data used to move weighted MAE by ~0.01 between runs. Root cause was two things stacking: `LightGBM`'s RNG wasn't seeded (`seed`/`deterministic`/`force_row_wise` are now set), *and* a training-table builder iterated a Python `set` whose order depends on the per-process hash seed — fixed by sorting it (`src/data.py::known_room_types`). Confirmed by training twice — locally and again inside the built Docker image — and diffing the resulting model files: byte-identical both times.
-- **A real test suite** (`tests/`, 29 tests, pytest): constraint enforcement (fuzzed with 500 random inputs), the shrinkage-weight formula, the room-type dimension-table repair, the model version registry, `predict_booking_curve`'s contract (schema, bounds, monotonicity, the unseen-hotel cold-start path), and a leakage test proving `as_of_date` output is invariant to any reservation booked after it, with a positive control proving the test would actually fail if that weren't true. Runs against a synthetic fixture (`tests/conftest.py`) with the same schema as the real data — the proprietary extract itself is never committed to this repo.
-- **A minimal model registry** (`src/registry.py`): `python -m src.train` saves to `artifacts/model/<timestamp>/` and atomically updates `artifacts/model/current.json`. Rollback is `--model-version <older-timestamp>` or editing that pointer directly — a real, testable mechanic, not a paragraph in DESIGN.md §6.5.
+- **A model registry** (`src/registry.py`): `python -m src.train` saves to `artifacts/model/<timestamp>/` and atomically updates `artifacts/model/current.json`. Rollback is `--model-version <older-timestamp>` or editing that pointer directly — a real, testable mechanic, not a paragraph in DESIGN.md §6.5.
 - **Structured logging** (`src/logging_config.py`) in place of bare `print()`, level controlled by `LOG_LEVEL`.
-- **A hardened FastAPI service** (`src/api.py`): the model loads at startup (a broken artifact fails the readiness probe at deploy time, not on a customer's first request), `/readyz` reflects real load state, every response carries an `X-Request-ID`, errors split into 400 (bad input) vs. 500 (a bug, logged with a stack trace, never leaked to the caller), and a togglable API-key check (`BOOKING_CURVE_API_KEY`) stands in for real auth. Tested over live HTTP, not just unit tests: the happy path, an anchored `as_of_date`, a totally unseen hotel (cold start — confirmed 200, not a crash), and `/readyz` correctly reporting 503 with no model present.
-- **`Dockerfile` + `.dockerignore`**, one image doing double duty — `docker run <image>` serves; override `CMD` to run `train` or `predict` as a batch job instead of maintaining a second image. Built and run end-to-end, and it surfaced two real bugs neither code review nor a local venv would have caught: `numpy==2.5.2` doesn't exist for Python 3.11 at all (only 3.12+) — repinned to the exact versions `pip` actually resolves inside the image; and `python:3.11-slim` ships without `libgomp.so.1`, which LightGBM's compiled core needs to even import — added `libgomp1` via `apt-get`. After both fixes: trained inside the container against the real data, generated predictions that scored identically to the local run (0.3008 / 0.3061, byte-for-byte reproducible on a second in-container run), and ran it as a live server — `/healthz`, `/readyz`, and a real `/booking-curve` call all verified over `curl`, with Docker's own `HEALTHCHECK` reporting `healthy`.
-- **CI/CD** (`.github/workflows/ci.yml`): lint + the full test suite against the synthetic fixture, then a Docker build and a smoke test (starts the container, confirms `/healthz` is up and `/readyz` correctly reports 503 with no model mounted), then — on `main`, gated on both of those passing — publishes the image to `ghcr.io/<owner>/booking-curve-service` using the workflow's own built-in token, no external registry account to provision. Deliberately doesn't train on real data (never committed here) or deploy anywhere; that's the actual promotion path in DESIGN.md §6.5, not something to fake here.
-- **Consolidated, pinned `requirements.txt`**, resolved and verified inside the actual target environment rather than assumed from a local dev shell on a different Python version — see the Docker bullet above for why that distinction turned out to matter.
+- **A hardened FastAPI service** (`src/api.py`): the model loads at startup, `/readyz` reflects real load state, every response carries an `X-Request-ID`, errors split into 400 vs. 500, a togglable API-key check stands in for real auth.
+- **`Dockerfile` + `.dockerignore`**, one image serving or running batch jobs by overriding `CMD`. Building and actually running it surfaced two real bugs code review wouldn't have: `numpy==2.5.2` doesn't exist for Python 3.11 (only 3.12+); `python:3.11-slim` ships without `libgomp.so.1`, which LightGBM needs to even import.
+- **CI/CD** (`.github/workflows/ci.yml`): lint + tests, Docker build + smoke test, then publish to `ghcr.io` on `main` using the workflow's own token.
 
-**What's still genuinely missing**, stated plainly rather than left implicit: no database (everything is local files — fine at this scale, not at "hundreds of hotels"), no message queue / scheduler / actual deployment anywhere, no auth beyond the placeholder header check, no monitoring or drift detection actually wired up (DESIGN.md §6.5/§6.6 describe what I'd build; none of it runs), no load testing, no secrets management. The registry and hardened API are real, working mechanics; they are not a production deployment.
+**Round 2 — a second "what's still missing?" pass, closing what it found:**
+
+- **`scripts/generate_demo_data.py`**: the gap behind "I can't see the output without the real data." Writes a synthetic dataset with the same schema (shared generator with the test fixture — `src/demo_data.py` — so they can't drift apart), and prints the exact commands to train, predict for a real hotel *and* for `hotel_Z` (which appears nowhere in the dataset — the true cold-start path), and serve it. Every command in its printed output was actually run to confirm it works verbatim, not just written.
+- **`evaluation/interval_metrics.py`**: the PICP/pinball-loss numbers in DESIGN.md §6.7 were originally produced by a throwaway analysis script that was never committed — the claim wasn't actually reproducible from this repo. This is that script, for real, checked in with its output (`evaluation/interval_metrics.json`). Writing it for real caught a bug the throwaway version had papered over (a dict keyed inconsistently by quantile name vs. quantile value) — fixed, then re-verified the number it produces (39.3%) matches what was already in the docs, and surfaced a new finding along the way: `hotel_H`'s miscalibration is almost entirely one-directional (0% below p10, 61.2% above p90), which is *more* consistent with "one-directional level bias from an unseen season" than generic noise would be — now in DESIGN.md §6.7.
+- **`tests/test_api.py`** (12 tests) and **`tests/test_model_batch.py`** (3 tests): the FastAPI service was previously verified only by hand with `curl`, and `predict_curve_batch` — the vectorized path that actually produces `evaluation/predictions.json` — had zero test coverage despite being the code path behind the graded deliverable. The batch test's most important assertion: it agrees with the per-row path the live API serves, checkpoint for checkpoint, quantile for quantile — if those two ever silently diverged, predictions.json would stop reflecting what the service actually serves.
+- **Coverage measured, not guessed**: 94% (`pytest --cov=src`), up from an unmeasured baseline — `src/model.py` and `src/registry.py` are at 100%.
+- **Dependency vulnerability scanning** (`pip-audit`, now in CI) — clean on both `requirements.txt` and `requirements-dev.txt` as of this writing, and now checked on every push, not just once by hand.
+- **Dependabot** (`.github/dependabot.yml`) for pip, Docker, and GitHub Actions, with `pandas`/`numpy`/`scikit-learn`/`lightgbm` grouped into their own PR — a model-affecting dependency bump deserves a retrain + re-verify, not a drive-by merge alongside an unrelated `pydantic` bump.
+- **Docker base image pinned by digest**, not just the `3.11-slim` tag — a floating tag means a rebuild next month silently pulls a different image with different CVEs than the one actually verified here.
+- **A real graceful-shutdown bug, found by Docker's own linter and then actually fixed and verified**: the first attempt at a configurable worker count used shell-form `CMD` so `$WEB_CONCURRENCY` would expand — which wraps the process in `/bin/sh -c`, so `docker stop`'s `SIGTERM` hits the shell (which doesn't forward it) instead of uvicorn, forcing a hard kill after the grace period. Fixed with `docker-entrypoint.sh` (`exec uvicorn ...` — replaces the shell process instead of forking a child). Verified, not assumed: timed `docker stop` against the fixed image — 1.4s with uvicorn's own "Shutting down / Application shutdown complete" in the logs, not a 10s forced kill.
+- **`BOOKING_CURVE_DATA_DIR` / `BOOKING_CURVE_MODEL_BASE_DIR` env vars** (`src/predict.py::_default_paths`) — the service was previously only configurable by editing code. This is also what let `tests/test_api.py` point a real `TestClient` at the synthetic fixture without monkeypatching internals.
+- **CLI input validation** — a malformed `--stay-date` used to surface as a raw pandas traceback; the API already handled this correctly via Pydantic, the CLI didn't. Now it does.
+- **`pre-commit` config**, scoped to match CI exactly (`ruff check` on `src`/`tests`, excluding notebooks and the byte-identical copy of Ampliphi's own `evaluate.py`) — deliberately *not* running an opinionated auto-formatter, which would have rewritten most of the repo for whitespace with no correctness value and fought the comments-next-to-code style used throughout. Consistency with CI was a deliberate choice, checked by actually running it, not assumed from the YAML.
+- **Branch protection on `main`** (required status checks: `lint-and-test`, `docker-build-and-smoke-test`; no force-push, no deletion) and a **`CODEOWNERS`** file.
+
+**What's still genuinely missing**, stated plainly rather than left implicit: no database (everything is local files — fine at this scale, not at "hundreds of hotels"), no message queue / scheduler / actual deployment anywhere, no auth beyond the placeholder header check, no metrics/tracing endpoint, no CORS or rate limiting, no automated retraining schedule, no monitoring or drift detection actually wired up (DESIGN.md §6.5/§6.6 describe what I'd build; none of it runs), no load testing, no secrets management, no API versioning, no multi-stage Docker build (checked whether one would help — it wouldn't: every heavy dependency here is a prebuilt wheel, nothing compiled to shed at a build stage). The registry and hardened API are real, working mechanics; they are not a production deployment.
 
 ## What I'd build next
 
@@ -137,18 +171,24 @@ src/
   api.py             # hardened FastAPI service (startup load, readyz, request ids, auth placeholder)
   registry.py         # versioned model artifacts + current.json pointer (rollback lever)
   logging_config.py   # structured logging setup shared by every entrypoint
-tests/                 # 29 tests against a synthetic fixture — see conftest.py
+  demo_data.py         # synthetic dataset generator — shared by tests/ and scripts/generate_demo_data.py
+scripts/
+  generate_demo_data.py  # writes a runnable demo dataset for anyone without the real extract
+tests/                 # 44 tests, 94% coverage, all against the synthetic fixture — see conftest.py
 artifacts/model/
   current.json         # pointer to the live version
   <timestamp>/          # one versioned artifact (level.txt, shape.txt, meta.json, ...)
 evaluation/
   predictions.json      # test-window predictions, scored by evaluation/evaluate.py
   results.json           # evaluate.py output
+  interval_metrics.py    # PICP / pinball loss — the source of DESIGN.md §6.7's numbers
+  interval_metrics.json  # its output
   compare_production.py  # 3-way comparison script + its output above
 notebooks/exploration.ipynb
 presentation/index.html   # visual write-up (self-contained, open in a browser)
-Dockerfile / .dockerignore
-.github/workflows/ci.yml
+Dockerfile / .dockerignore / docker-entrypoint.sh
+.github/workflows/ci.yml / dependabot.yml / CODEOWNERS
+.pre-commit-config.yaml
 requirements.txt / requirements-dev.txt
 DESIGN.md
 ```

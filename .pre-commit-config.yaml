@@ -1,0 +1,31 @@
+# pip install -r requirements-dev.txt && pre-commit install
+# Runs the same checks CI does, before they can even land in a commit —
+# CI (ruff + pytest) is the enforced gate; this just gives faster feedback.
+repos:
+  # ruff-format deliberately not enabled here: it's a from-scratch,
+  # opinionated reformat (one-key-per-line dict literals, etc.) that would
+  # touch nearly every file for pure whitespace, no correctness value, and
+  # would fight the deliberately compact style used throughout this repo's
+  # comments-next-to-code. `ruff check` (the actual lint/correctness layer,
+  # already clean and enforced in CI) is the standard here, not a full
+  # formatter adoption.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(src|tests)/
+        # Scoped to exactly what CI runs (`ruff check src tests`) — not
+        # notebooks/ (different, denser style conventions are normal in
+        # EDA cells) and not evaluation/evaluate.py specifically (kept
+        # byte-identical to Ampliphi's own provided scoring script on
+        # purpose; a linter silently "fixing" import order in someone
+        # else's file isn't a fix).
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: [--maxkb=2000]
+      - id: check-merge-conflict

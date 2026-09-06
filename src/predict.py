@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -77,7 +78,16 @@ def _context(data_dir: str, model_base_dir: str, model_version: str | None):
 
 
 def _default_paths():
-    return str(REPO_ROOT / "data"), str(REPO_ROOT / "artifacts" / "model")
+    """Env-overridable so the service is configurable without a code
+    change (12-factor: config lives in the environment, not hardcoded
+    paths) — and so tests can point the API at a synthetic fixture instead
+    of monkeypatching internals. `BOOKING_CURVE_DATA_DIR` /
+    `BOOKING_CURVE_MODEL_BASE_DIR` win when set; otherwise the same
+    repo-relative defaults as before.
+    """
+    data_dir = os.environ.get("BOOKING_CURVE_DATA_DIR", str(REPO_ROOT / "data"))
+    model_base_dir = os.environ.get("BOOKING_CURVE_MODEL_BASE_DIR", str(REPO_ROOT / "artifacts" / "model"))
+    return data_dir, model_base_dir
 
 
 def predict_booking_curve(
@@ -145,18 +155,18 @@ def predict_booking_curve(
                     if cp >= dus_now:
                         calendar_date = stay_ts - pd.Timedelta(days=cp)
                         merged[str(cp)] = realized_fraction_as_of(
-                            reservations, hotel_id, room_type_code, stay_ts,
-                            calendar_date, room_total,
+                            reservations,
+                            hotel_id,
+                            room_type_code,
+                            stay_ts,
+                            calendar_date,
+                            room_total,
                         )
                     else:
                         remaining_growth = (point[str(cp)] - model_at_anchor) / denom
                         remaining_growth = float(np.clip(remaining_growth, 0.0, 1.0))
-                        merged[str(cp)] = anchor_frac + remaining_growth * (
-                            effective_final - anchor_frac
-                        )
-                result_curve = enforce_curve_constraints(
-                    CHECKPOINTS, [merged[str(c)] for c in CHECKPOINTS]
-                )
+                        merged[str(cp)] = anchor_frac + remaining_growth * (effective_final - anchor_frac)
+                result_curve = enforce_curve_constraints(CHECKPOINTS, [merged[str(c)] for c in CHECKPOINTS])
                 anchor_info = {
                     "mode": "anchored",
                     "dus_now": dus_now,
@@ -249,6 +259,18 @@ def main():
 
     if not (args.hotel_id and args.room_type_code and args.stay_date):
         ap.error("--hotel-id, --room-type-code and --stay-date are required unless --generate-eval")
+
+    # api.py gets clean 422s for free from Pydantic's `date` type; this CLI
+    # bypasses that entirely (argparse just hands predict_booking_curve raw
+    # strings), so a typo'd date used to surface as a bare pandas
+    # traceback. Same validation logic, just enforced by hand here instead.
+    for flag, value in (("--stay-date", args.stay_date), ("--as-of-date", args.as_of_date)):
+        if value is None:
+            continue
+        try:
+            pd.Timestamp(value)
+        except (ValueError, TypeError):
+            ap.error(f"{flag}: '{value}' is not a valid date (expected YYYY-MM-DD)")
 
     result = predict_booking_curve(
         args.hotel_id,

@@ -1,0 +1,24 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # Model-affecting deps get their own PR — a numpy/pandas/lightgbm
+      # bump can change model output (see the determinism work in
+      # README's "Engineering hardening"); it deserves a retrain +
+      # re-verify, not a drive-by merge bundled with, say, a pydantic bump.
+      ml-core:
+        patterns: ["pandas", "numpy", "scikit-learn", "lightgbm"]
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

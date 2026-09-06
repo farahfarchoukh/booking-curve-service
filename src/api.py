@@ -32,7 +32,7 @@ from pydantic import BaseModel
 
 from .logging_config import get_logger
 from .model import BookingCurveModel
-from .predict import _default_paths, predict_booking_curve
+from .predict import _context, _default_paths, predict_booking_curve
 from .registry import resolve_model_dir
 
 log = get_logger(__name__)
@@ -56,16 +56,22 @@ state = ServiceState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Reset on every startup, not just the first — otherwise a second
+    # lifespan run in the same process (a restart in a long-lived worker,
+    # or a test harness spinning up a fresh TestClient) would see stale
+    # state left over from a previous run instead of a clean load.
+    state.model = None
+    state.model_version = None
+    state.load_error = None
     data_dir, model_base = _default_paths()
     try:
         resolved = resolve_model_dir(Path(model_base))
         state.model_version = resolved.name
-        # Loading through predict_booking_curve's own cache (rather than a
-        # second, separate load path here) so the API and the CLI are
-        # guaranteed to be looking at the exact same artifact loader.
-        predict_booking_curve(
-            "hotel_C", "rt_ea30c05c4c", "2099-01-01", data_dir=data_dir, model_dir=model_base
-        )
+        # Load through _context — the exact same loader predict_booking_curve
+        # itself uses — rather than a second load path here, and without
+        # hardcoding a real dataset's hotel/room-type id just to warm the
+        # cache (this service has no business assuming which hotels exist).
+        _context(data_dir, model_base, None)
         state.model = True  # sentinel: loaded OK (the real object is cached in predict.py)
         log.info(f"Startup: model version {state.model_version} loaded and warmed.")
     except Exception as exc:

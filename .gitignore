@@ -7,6 +7,12 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+.coverage
+coverage.xml
+
+# Demo dataset (scripts/generate_demo_data.py output) — regenerate, don't commit
+demo_data/
+demo_data_artifacts/
 
 # Environments
 .venv/
