@@ -17,5 +17,9 @@ ipykernel==7.3.0
 matplotlib==3.11.1
 seaborn==0.13.2
 # was only a transitive scikit-learn dep before this; pinned explicitly now
-# that evaluation/price_demand_eda.py imports it directly (Spearman correlation)
-scipy==1.18.1
+# that evaluation/price_demand_eda.py imports it directly (Spearman
+# correlation). 1.17.1, not the newer version this dev venv resolved
+# locally on Python 3.14 — scipy>=1.18 requires Python>=3.12, and CI runs
+# 3.11 (see requirements.txt's own comment on the exact same class of bug
+# with an earlier numpy pin: verify against CI's Python, not a local one)
+scipy==1.17.1
