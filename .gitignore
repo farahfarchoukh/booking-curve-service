@@ -1,0 +1,22 @@
+# Proprietary data — never committed. See README "Data".
+data/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Environments
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+.vscode/settings.json
+
+# Local scratch (Docker smoke-test volumes etc.)
+*_docker_test/
+uvicorn*.log
+uvicorn*.pid

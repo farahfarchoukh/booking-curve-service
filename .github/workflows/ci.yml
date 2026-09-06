@@ -1,0 +1,73 @@
+# CI: lint + test on the synthetic fixture, then confirm the Docker image
+# builds and actually runs, then publish it. Deliberately does NOT run
+# src/train.py against real data — the proprietary Ampliphi extract is
+# never committed to this repo (see README), so there's nothing for a
+# hosted runner to train on. Everything here runs against
+# tests/conftest.py's synthetic fixture instead, which is the point: the
+# pipeline is exercised on every push without the real dataset ever needing
+# to exist outside a laptop with the extract on it.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check src tests
+      - run: pytest -q
+
+  docker-build-and-smoke-test:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t booking-curve-service:${{ github.sha }} .
+      - name: smoke-test the image starts and reports unready without a model
+        run: |
+          docker run -d --name smoke -p 8000:8000 booking-curve-service:${{ github.sha }}
+          sleep 3
+          curl -sf http://localhost:8000/healthz
+          # /readyz is expected to be 503 here: no artifacts/model volume is
+          # mounted in this smoke test, so there's no model to load. That's
+          # the correct behavior, not a failure — a real deploy mounts the
+          # model artifact; see the Dockerfile's own `docker run` examples.
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/readyz)
+          test "$status" = "503"
+          docker logs smoke
+          docker stop smoke
+
+  publish:
+    # Only on main, and only after both checks above pass — this is the
+    # promotion gate. Pushes to ghcr.io using the workflow's own built-in
+    # GITHUB_TOKEN (repo Settings > Actions > enable "Read and write
+    # permissions" for it once) — no external registry account or secret
+    # to provision. This is as far as CI/CD goes here; it does not deploy
+    # anywhere — see DESIGN.md §6.5 for the shadow -> canary -> rollout
+    # path a real deploy would go through from here.
+    runs-on: ubuntu-latest
+    needs: [lint-and-test, docker-build-and-smoke-test]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          IMAGE=ghcr.io/${{ github.repository_owner }}/booking-curve-service
+          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"

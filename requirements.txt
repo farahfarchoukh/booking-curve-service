@@ -1,0 +1,14 @@
+# Self-sufficient, pinned dependency set — does not assume any other
+# package's requirements.txt exists alongside it. Pinned to exact versions
+# resolved and verified inside the Dockerfile's python:3.11-slim image
+# (docker build, then `pip freeze` inside the container) — not just
+# whatever a local dev shell happens to have. A first pass here pinned
+# numpy==2.5.2, which doesn't exist for Python 3.11 at all (only 3.12+);
+# that only surfaced by actually running `docker build`, which is exactly
+# why it's worth doing instead of trusting a local venv on a newer Python.
+# `requirements-dev.txt` adds test/lint/API/notebook tooling on top of
+# this — not needed to train, predict, or evaluate.
+pandas==3.0.5
+numpy==2.3.5
+scikit-learn==1.9.0
+lightgbm==4.7.0

@@ -1,0 +1,15 @@
+# Everything beyond requirements.txt: the FastAPI stretch demo, the test
+# suite, linting, and re-executing notebooks/exploration.ipynb from scratch.
+# Nothing in `src/train.py` / `src/predict.py` / `evaluation/evaluate.py`
+# needs any of this — see README "What's implemented" for the split.
+-r requirements.txt
+fastapi==0.141.1
+uvicorn==0.52.4
+pydantic==2.13.5
+pytest==9.1.1
+ruff==0.16.6
+nbformat==5.11.1
+nbclient==0.11.0
+ipykernel==7.3.0
+matplotlib==3.11.1
+seaborn==0.13.2

@@ -1,0 +1,410 @@
+<title>Booking Curve Service</title>
+<meta name="description" content="How I built a single booking-curve forecasting service across eight structurally different hotels — approach, results, and an honest read on where it still breaks.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --paper:#f1f3ef; --paper-raise:#e7ebe4; --ink:#181c17; --ink-soft:#565f52;
+    --line:#d7dbd1; --brass:#a1721f; --brass-soft:#c99a4a; --teal:#2c6b63; --teal-soft:#4f8c83;
+    --warn:#a34a35; --good:#2c6b63;
+    --shadow: 0 1px 2px rgba(24,28,23,.06);
+    --font-display:'Fraunces', ui-serif, Georgia, serif;
+    --font-body:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#141713; --paper-raise:#1c201a; --ink:#e9ece4; --ink-soft:#9aa393;
+      --line:#2b3026; --brass:#d3a355; --brass-soft:#8a651f; --teal:#5fa89d; --teal-soft:#3a7168;
+      --warn:#d97a5f; --good:#5fa89d; --shadow:0 1px 2px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#141713; --paper-raise:#1c201a; --ink:#e9ece4; --ink-soft:#9aa393;
+    --line:#2b3026; --brass:#d3a355; --brass-soft:#8a651f; --teal:#5fa89d; --teal-soft:#3a7168;
+    --warn:#d97a5f; --good:#5fa89d; --shadow:0 1px 2px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{background:var(--paper); color:var(--ink); font-family:var(--font-body); line-height:1.55; margin:0;}
+  ::selection{background:var(--brass-soft); color:var(--paper);}
+
+  .wrap{max-width:840px; margin:0 auto; padding:0 24px;}
+  .wide{max-width:1040px; margin:0 auto; padding:0 24px;}
+
+  nav.topbar{position:sticky; top:0; z-index:5; background:color-mix(in srgb, var(--paper) 88%, transparent); backdrop-filter:blur(6px); border-bottom:1px solid var(--line);}
+  nav.topbar .row{display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; flex-wrap:wrap;}
+  nav.topbar .brand{font-family:var(--font-mono); font-size:13px; letter-spacing:.04em; color:var(--ink-soft);}
+  nav.topbar .links{display:flex; gap:18px; flex-wrap:wrap;}
+  nav.topbar a{color:var(--ink-soft); text-decoration:none; font-size:13px; font-family:var(--font-mono);}
+  nav.topbar a:hover, nav.topbar a:focus-visible{color:var(--brass);}
+
+  header.hero{padding:64px 0 40px;}
+  .eyebrow{font-family:var(--font-mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--teal); margin:0 0 14px;}
+  h1{font-family:var(--font-display); font-weight:500; font-size:clamp(30px,4.4vw,46px); line-height:1.12; text-wrap:balance; margin:0 0 18px;}
+  h1 em{font-style:italic; color:var(--brass);}
+  .lede{font-size:18px; color:var(--ink-soft); max-width:64ch; margin:0 0 8px;}
+  .byline{font-family:var(--font-mono); font-size:12.5px; color:var(--ink-soft); margin-top:22px;}
+
+  .stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:10px; overflow:hidden; margin:36px 0 8px;}
+  .stat{background:var(--paper-raise); padding:18px 18px 16px;}
+  .stat .n{font-family:var(--font-display); font-size:30px; font-weight:500; font-variant-numeric:tabular-nums; line-height:1;}
+  .stat .n small{font-family:var(--font-mono); font-size:14px; color:var(--ink-soft); font-weight:400;}
+  .stat .l{font-family:var(--font-mono); font-size:11.5px; color:var(--ink-soft); margin-top:8px; letter-spacing:.02em;}
+  .stat.pos .n{color:var(--good);}
+
+  section{padding:52px 0;}
+  section + section{border-top:1px solid var(--line);}
+  .kicker{display:flex; align-items:baseline; gap:12px; margin-bottom:6px;}
+  .kicker .num{font-family:var(--font-mono); font-size:13px; color:var(--brass);}
+  h2{font-family:var(--font-display); font-weight:500; font-size:clamp(22px,3vw,30px); margin:0 0 18px; text-wrap:balance;}
+  h3{font-family:var(--font-body); font-weight:600; font-size:15px; margin:28px 0 10px; color:var(--ink);}
+  p{margin:0 0 16px; max-width:70ch;}
+  .wide p{max-width:72ch;}
+  a{color:var(--teal);}
+  code{font-family:var(--font-mono); font-size:.9em; background:var(--paper-raise); padding:.12em .38em; border-radius:4px;}
+
+  /* hotel heterogeneity grid */
+  .hotels{display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px; margin:20px 0 8px;}
+  .hcard{background:var(--paper-raise); border:1px solid var(--line); border-radius:9px; padding:13px 14px; box-shadow:var(--shadow);}
+  .hcard .id{font-family:var(--font-mono); font-size:12px; color:var(--brass); letter-spacing:.02em;}
+  .hcard .region{font-size:13.5px; font-weight:600; margin:3px 0 8px;}
+  .hcard dl{margin:0; display:grid; grid-template-columns:auto 1fr; gap:2px 8px; font-size:12px; color:var(--ink-soft);}
+  .hcard dt{font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; align-self:center;}
+  .hcard dd{margin:0; font-variant-numeric:tabular-nums;}
+  .hcard.has-data{border-color:var(--teal-soft);}
+  .hcard .tag{display:inline-block; font-family:var(--font-mono); font-size:9.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--teal); border:1px solid var(--teal-soft); border-radius:20px; padding:1px 7px; margin-top:8px;}
+
+  /* architecture diagram */
+  .arch{width:100%; height:auto; margin:20px 0 6px; font-family:var(--font-mono);}
+  .arch .box{fill:var(--paper-raise); stroke:var(--line);}
+  .arch .box.accent{stroke:var(--brass-soft);}
+  .arch .box.accent2{stroke:var(--teal-soft);}
+  .arch text{fill:var(--ink); font-size:12px;}
+  .arch text.sub{fill:var(--ink-soft); font-size:10.5px;}
+  .arch text.tag{fill:var(--teal); font-size:10px;}
+  .arch line, .arch path{stroke:var(--ink-soft); stroke-width:1.3; fill:none; marker-end:url(#arrow);}
+
+  /* leakage table */
+  .tbl-wrap{overflow-x:auto; margin:18px 0;}
+  table{border-collapse:collapse; width:100%; font-size:13px;}
+  th,td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top;}
+  th{font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-soft); font-weight:500;}
+  td.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap;}
+  tr.hl td{color:var(--ink); font-weight:600;}
+
+  /* results charts */
+  .charts{display:grid; grid-template-columns:1fr 1fr; gap:28px; margin:22px 0 10px;}
+  @media (max-width:700px){.charts{grid-template-columns:1fr;}}
+  .chart-card{background:var(--paper-raise); border:1px solid var(--line); border-radius:10px; padding:18px 18px 10px;}
+  .chart-card h4{margin:0 0 4px; font-size:13px; font-weight:600;}
+  .chart-card .cap{font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); margin-bottom:6px;}
+  svg text{font-family:var(--font-mono);}
+  .axis{stroke:var(--line);}
+  .axis-label{fill:var(--ink-soft); font-size:9.5px;}
+  .bar-base{fill:var(--ink-soft); opacity:.45;}
+  .bar-prod{fill:var(--brass-soft);}
+  .bar-ours{fill:var(--teal);}
+  .val-label{fill:var(--ink); font-size:10.5px; font-variant-numeric:tabular-nums;}
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-family:var(--font-mono); font-size:10.5px; color:var(--ink-soft); margin-top:8px;}
+  .legend .sw{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:-1px;}
+  .line-c{stroke:var(--teal); fill:none; stroke-width:2.2;}
+  .line-h{stroke:var(--brass); fill:none; stroke-width:2.2;}
+  .dot-c{fill:var(--teal);}
+  .dot-h{fill:var(--brass);}
+
+  /* coverage bar */
+  .coverage{margin:22px 0 6px;}
+  .cov-bar{display:flex; height:34px; border-radius:8px; overflow:hidden; border:1px solid var(--line);}
+  .cov-seg{display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); font-size:11px; color:var(--paper);}
+  .cov-below{background:var(--ink-soft);}
+  .cov-in{background:var(--teal);}
+  .cov-above{background:var(--warn);}
+  .cov-target{position:relative; margin-top:6px; font-family:var(--font-mono); font-size:10.5px; color:var(--ink-soft);}
+
+  /* shrink bars */
+  .shrink{display:grid; gap:10px; margin:18px 0 6px; max-width:520px;}
+  .shrink-row{display:grid; grid-template-columns:96px 1fr 48px; align-items:center; gap:10px; font-family:var(--font-mono); font-size:12px;}
+  .shrink-track{background:var(--paper-raise); border:1px solid var(--line); border-radius:5px; height:14px; overflow:hidden;}
+  .shrink-fill{height:100%; background:var(--brass);}
+
+  ul.tight{margin:0 0 16px; padding-left:20px;}
+  ul.tight li{margin-bottom:8px;}
+  .callout{border-left:3px solid var(--warn); background:var(--paper-raise); padding:14px 16px; border-radius:0 8px 8px 0; margin:18px 0;}
+  .callout strong{color:var(--warn);}
+  .callout.good{border-left-color:var(--good);}
+  .callout.good strong{color:var(--good);}
+
+  footer{padding:44px 0 70px; color:var(--ink-soft); font-size:13px;}
+  footer .wrap{display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px;}
+  footer a{color:var(--ink-soft);}
+  footer a:hover{color:var(--brass);}
+
+  @media (prefers-reduced-motion: no-preference){
+    section{animation:rise .5s ease both;}
+  }
+  @keyframes rise{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;}}
+</style>
+
+<nav class="topbar">
+  <div class="wrap row">
+    <span class="brand">AMPLIPHI · BOOKING CURVE SERVICE</span>
+    <div class="links">
+      <a href="#problem">Problem</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#results">Results</a>
+      <a href="#coldstart">Cold start</a>
+      <a href="#next">What's next</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Booking Curve Service — Design &amp; Engineering Overview</p>
+    <h1>One booking-curve service for eight hotels that <em>share almost nothing</em>.</h1>
+    <p class="lede">Five currencies, two PMS schemas, room types with as few as one physical unit, and a training window that ends the month before the season it has to forecast. Here's how the model is shaped, why, and — just as importantly — where I know it still breaks.</p>
+    <p class="byline">Farah Farchoukh · predict_booking_curve(hotel_id, room_type_code, stay_date, as_of_date)</p>
+
+    <div class="stats">
+      <div class="stat pos"><div class="n">−12<small>%</small></div><div class="l">WEIGHTED MAE VS. HEURISTIC BASELINE</div></div>
+      <div class="stat pos"><div class="n">0.19<small> MAE</small></div><div class="l">BEATS THE PRODUCTION CURVE'S 0.28†</div></div>
+      <div class="stat"><div class="n">0<small>%</small></div><div class="l">MONOTONICITY / BOUND VIOLATIONS</div></div>
+      <div class="stat"><div class="n">2<small> of 8</small></div><div class="l">HOTELS WITH ANY RESERVATION HISTORY</div></div>
+    </div>
+    <p class="byline">† hotel_C's base room type only — the sole room `expected_booking_curves.csv` covers.</p>
+  </div>
+</header>
+
+<section id="problem">
+  <div class="wrap">
+    <div class="kicker"><span class="num">01</span></div>
+    <h2>The task looks like a forecasting problem. It's mostly a generalization problem.</h2>
+    <p>Only <code>hotel_C</code> (1,463 usable training curves) and <code>hotel_H</code> (40) have any reservation history at all. The other six exist purely to test whether the approach generalizes — and the two I <em>can</em> train on are already about as different as two hotels get.</p>
+  </div>
+  <div class="wide">
+    <div class="hotels">
+      <div class="hcard has-data"><div class="id">hotel_C</div><div class="region">Resort · Coastal</div><dl><dt>Ctry</dt><dd>US</dd><dt>Curr</dt><dd>USD</dd><dt>PMS</dt><dd>agora</dd><dt>Rate</dt><dd>average*</dd><dt>Rooms</dt><dd>68</dd></dl><span class="tag">1,463 curves</span></div>
+      <div class="hcard has-data"><div class="id">hotel_H</div><div class="region">Resort · Mountain</div><dl><dt>Ctry</dt><dd>CA</dd><dt>Curr</dt><dd>CAD</dd><dt>PMS</dt><dd>agora</dd><dt>Rate</dt><dd>lowest</dd><dt>Rooms</dt><dd>64</dd></dl><span class="tag">40 curves · off-season only</span></div>
+      <div class="hcard"><div class="id">hotel_A</div><div class="region">Resort · Coastal</div><dl><dt>Ctry</dt><dd>US</dd><dt>Curr</dt><dd>USD</dd><dt>PMS</dt><dd>agora</dd><dt>Rate</dt><dd>lowest</dd><dt>Rooms</dt><dd>149</dd></dl></div>
+      <div class="hcard"><div class="id">hotel_B</div><div class="region">Resort · Coastal</div><dl><dt>Ctry</dt><dd>US</dd><dt>Curr</dt><dd>USD</dd><dt>PMS</dt><dd>agora</dd><dt>Rate</dt><dd>lowest</dd><dt>Rooms</dt><dd>89</dd></dl></div>
+      <div class="hcard"><div class="id">hotel_D</div><div class="region">Urban · Outer</div><dl><dt>Ctry</dt><dd>AU</dd><dt>Curr</dt><dd>AUD</dd><dt>PMS</dt><dd>cms</dd><dt>Rate</dt><dd>lowest</dd><dt>Rooms</dt><dd>93</dd></dl></div>
+      <div class="hcard"><div class="id">hotel_E</div><div class="region">Regional</div><dl><dt>Ctry</dt><dd>NZ</dd><dt>Curr</dt><dd>NZD</dd><dt>PMS</dt><dd>cms</dd><dt>Rate</dt><dd>lowest</dd><dt>Rooms</dt><dd>116</dd></dl></div>
+      <div class="hcard"><div class="id">hotel_F</div><div class="region">Urban · Core</div><dl><dt>Ctry</dt><dd>MX</dd><dt>Curr</dt><dd>MXN</dd><dt>PMS</dt><dd>agora</dd><dt>Rate</dt><dd>lowest</dd><dt>Rooms</dt><dd>89</dd></dl></div>
+      <div class="hcard"><div class="id">hotel_G</div><div class="region">Regional</div><dl><dt>Ctry</dt><dd>AU</dd><dt>Curr</dt><dd>AUD</dd><dt>PMS</dt><dd>agora</dd><dt>Rate</dt><dd>lowest</dd><dt>Rooms</dt><dd>82</dd></dl></div>
+    </div>
+    <p style="font-size:12px; color:var(--ink-soft); font-family:var(--font-mono); margin-top:10px;">*hotel_C publishes an <em>average</em>-of-rate-plans price where the other seven publish the <em>lowest</em> — not comparable without knowing which.</p>
+  </div>
+  <div class="wrap">
+    <p>Two more things the raw tables don't advertise. First, <strong>room-type inventories run from 1 to 17 rooms</strong> — a room type with one unit has an occupancy fraction that can only ever be 0 or 1, which makes "predict a smooth curve" the wrong mental model for close to half of hotel_C's room types. Second, I found that <strong><code>reservations.csv</code> references four <code>room_type_code</code>s that don't exist in <code>room_types.csv</code></strong> — 655 and 536 reservations on two of them, on hotel_C alone. Left unpatched, that silently drops ~24% of the real test curves from evaluation. I treat it as the kind of PMS dimension-table drift a production pipeline needs to catch, not paper over — <code>src/data.py</code> detects and repairs it, loudly.</p>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="wrap">
+    <div class="kicker"><span class="num">02</span></div>
+    <h2>A backbone that never sees <code>hotel_id</code>, plus a correction that knows exactly how much to trust it.</h2>
+    <p>The model only ever sees attributes that exist for <em>any</em> hotel before its first reservation lands — country, currency, PMS type, rate mode, region type, room-count scale. That's what lets it say something for hotel_A tomorrow, not just hotel_C today. Tenant identity re-enters through a separate, explicitly-shrunk correction, not through a tree split on <code>hotel_id == hotel_C</code>.</p>
+  </div>
+  <div class="wide">
+    <svg class="arch" viewBox="0 0 1000 200" role="img" aria-label="Pipeline: onboarding attributes and calendar features feed a level model and a shape model; their product is combined and passed through constraint enforcement; per-hotel shrinkage and conformal calibration adjust the output.">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-soft)"/>
+        </marker>
+      </defs>
+      <rect class="box" x="20" y="70" width="150" height="60" rx="8"/>
+      <text x="95" y="94" text-anchor="middle">Attributes +</text>
+      <text x="95" y="110" text-anchor="middle">calendar</text>
+      <text class="sub" x="95" y="124" text-anchor="middle">no hotel_id</text>
+
+      <line x1="170" y1="100" x2="228" y2="49"/>
+      <line x1="170" y1="100" x2="228" y2="130"/>
+
+      <rect class="box accent2" x="230" y="20" width="150" height="55" rx="8"/>
+      <text x="305" y="43" text-anchor="middle">Level model</text>
+      <text class="sub" x="305" y="58" text-anchor="middle">final occupancy</text>
+
+      <rect class="box accent2" x="230" y="105" width="150" height="55" rx="8"/>
+      <text x="305" y="128" text-anchor="middle">Shape model</text>
+      <text class="sub" x="305" y="143" text-anchor="middle">pace g(cp), cp monotonic</text>
+
+      <line x1="380" y1="47" x2="440" y2="90"/>
+      <line x1="380" y1="132" x2="440" y2="95"/>
+
+      <rect class="box" x="440" y="70" width="110" height="50" rx="8"/>
+      <text x="495" y="92" text-anchor="middle">y = level × g(cp)</text>
+      <text class="sub" x="495" y="106" text-anchor="middle">combine</text>
+
+      <line x1="550" y1="95" x2="608" y2="95"/>
+
+      <rect class="box accent" x="610" y="70" width="150" height="50" rx="8"/>
+      <text x="685" y="90" text-anchor="middle">Clip + cummax</text>
+      <text class="sub" x="685" y="105" text-anchor="middle">constraint enforcement</text>
+
+      <line x1="760" y1="95" x2="818" y2="95"/>
+      <rect class="box" x="820" y="70" width="150" height="50" rx="8"/>
+      <text x="895" y="90" text-anchor="middle">Booking curve</text>
+      <text class="sub" x="895" y="105" text-anchor="middle">0 violations, by construction</text>
+
+      <rect class="box accent" x="770" y="0" width="200" height="34" rx="7"/>
+      <text class="tag" x="870" y="21" text-anchor="middle">shrinkage + calibration</text>
+      <line x1="870" y1="34" x2="870" y2="66"/>
+    </svg>
+  </div>
+  <div class="wrap">
+    <h3>Partial pooling without a hierarchical fit</h3>
+    <p>With two fitted hotels there's nothing to estimate a group-level variance from, so instead of a full hierarchical model I use its <em>behavior</em>: an empirical-Bayes correction, shrunk toward zero as <code>n/(n+K)</code>. It resolves cold start and per-hotel pooling with one mechanism:</p>
+    <div class="shrink">
+      <div class="shrink-row"><span>hotel_C</span><div class="shrink-track"><div class="shrink-fill" style="width:99%"></div></div><span>99%</span></div>
+      <div class="shrink-row"><span>hotel_H</span><div class="shrink-track"><div class="shrink-fill" style="width:73%"></div></div><span>73%</span></div>
+      <div class="shrink-row"><span>new hotel</span><div class="shrink-track"><div class="shrink-fill" style="width:0%"></div></div><span>0%</span></div>
+    </div>
+    <p style="font-size:13px; color:var(--ink-soft);">Share of its own observed bias a hotel gets back, on the level target. A hotel with no history yet gets exactly the shared backbone — not a special case, the same code path.</p>
+
+    <h3>What didn't make it into training, and why</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Table</th><th>Why excluded from training</th></tr></thead>
+        <tbody>
+          <tr><td><code>daily_inventory</code></td><td>Only exists Jul–Sep 2025 for hotel_B/C/F — zero training-period rows. Also: <code>actual_occupancy</code> at <code>as_of_date==stay_date</code> literally <em>is</em> the target.</td></tr>
+          <tr><td><code>expected_booking_curves</code></td><td>Same test-window-only coverage — used only as the production baseline to beat, never as a feature I can't validate historically.</td></tr>
+          <tr><td><code>suggested_prices</code></td><td>The pricer's own past output. As a feature it closes a feedback loop: "priced high → demand was X," not the cause.</td></tr>
+          <tr><td><code>competitor_rates</code></td><td>Sparse, one snapshot, room labels that don't map to <code>room_type_code</code>. A weekly market-position control at best.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="results">
+  <div class="wrap">
+    <div class="kicker"><span class="num">03</span></div>
+    <h2>Beats the baseline everywhere I can check it — and the incumbent, where a fair comparison exists.</h2>
+  </div>
+  <div class="wide">
+    <div class="charts">
+      <div class="chart-card">
+        <h4>All test predictions — 2,521 curves</h4>
+        <div class="cap">weighted MAE, lower is better</div>
+        <svg viewBox="0 0 340 140" width="100%">
+          <line class="axis" x1="88" y1="10" x2="88" y2="115"/>
+          <line class="axis" x1="88" y1="115" x2="320" y2="115"/>
+          <text class="axis-label" x="20" y="42">baseline</text>
+          <rect class="bar-base" x="88" y="30" width="184" height="26"/>
+          <text class="val-label" x="280" y="48">0.348</text>
+          <text class="axis-label" x="40" y="82">ours</text>
+          <rect class="bar-ours" x="88" y="70" width="162" height="26"/>
+          <text class="val-label" x="258" y="88">0.306</text>
+        </svg>
+      </div>
+      <div class="chart-card">
+        <h4>hotel_C base room only, vs. production</h4>
+        <div class="cap">weighted MAE, lower is better · n=92 (23 for production)</div>
+        <svg viewBox="0 0 340 150" width="100%">
+          <line class="axis" x1="88" y1="8" x2="88" y2="128"/>
+          <line class="axis" x1="88" y1="128" x2="320" y2="128"/>
+          <text class="axis-label" x="20" y="30">baseline</text>
+          <rect class="bar-base" x="88" y="18" width="167" height="20"/>
+          <text class="val-label" x="261" y="32">0.333</text>
+          <text class="axis-label" x="12" y="65">production</text>
+          <rect class="bar-prod" x="88" y="53" width="131" height="20"/>
+          <text class="val-label" x="225" y="67">0.262</text>
+          <text class="axis-label" x="40" y="100">ours</text>
+          <rect class="bar-ours" x="88" y="88" width="88" height="20"/>
+          <text class="val-label" x="182" y="102">0.177</text>
+        </svg>
+      </div>
+    </div>
+
+    <h3>Per-checkpoint MAE — the honest divergence</h3>
+    <p>hotel_C behaves the way a booking-curve model should: error <em>falls</em> as the stay approaches and more is known. hotel_H runs backwards — because its Jul–Sep busy season never appears in its own Apr–Jun training data, the gap between an under-anchored forecast and real late-arriving demand <em>widens</em> the closer we get.</p>
+    <div class="chart-card" style="max-width:640px;">
+      <svg viewBox="0 0 620 260" width="100%">
+        <line class="axis" x1="50" y1="20" x2="50" y2="210"/>
+        <line class="axis" x1="46" y1="210" x2="600" y2="210"/>
+        <line class="axis" x1="46" y1="115" x2="600" y2="115" stroke-dasharray="2 4"/>
+        <line class="axis" x1="46" y1="20" x2="600" y2="20" stroke-dasharray="2 4"/>
+        <g class="axis-label">
+          <text x="40" y="213" text-anchor="end">0.0</text>
+          <text x="40" y="118" text-anchor="end">.25</text>
+          <text x="40" y="24" text-anchor="end">.50 MAE</text>
+        </g>
+
+        <!-- x categories 90..0, evenly spaced x=70..590; y = 210 - (value/0.5)*190 -->
+        <polyline class="line-c" points="70,97.7 128,87.7 186,87.1 243,86.9 301,89.5 359,91.1 417,103.9 474,116.8 532,127.8 590,143.6"/>
+        <polyline class="line-h" points="70,167.0 128,149.5 186,135.2 243,104.3 301,83.4 359,60.1 417,42.8 474,36.0 532,26.2 590,43.0"/>
+        <g class="dot-c">
+          <circle cx="70" cy="97.7" r="2.6"/><circle cx="128" cy="87.7" r="2.6"/><circle cx="186" cy="87.1" r="2.6"/><circle cx="243" cy="86.9" r="2.6"/><circle cx="301" cy="89.5" r="2.6"/><circle cx="359" cy="91.1" r="2.6"/><circle cx="417" cy="103.9" r="2.6"/><circle cx="474" cy="116.8" r="2.6"/><circle cx="532" cy="127.8" r="2.6"/><circle cx="590" cy="143.6" r="2.6"/>
+        </g>
+        <g class="dot-h">
+          <circle cx="70" cy="167.0" r="2.6"/><circle cx="128" cy="149.5" r="2.6"/><circle cx="186" cy="135.2" r="2.6"/><circle cx="243" cy="104.3" r="2.6"/><circle cx="301" cy="83.4" r="2.6"/><circle cx="359" cy="60.1" r="2.6"/><circle cx="417" cy="42.8" r="2.6"/><circle cx="474" cy="36.0" r="2.6"/><circle cx="532" cy="26.2" r="2.6"/><circle cx="590" cy="43.0" r="2.6"/>
+        </g>
+
+        <g class="axis-label">
+          <text x="70" y="228" text-anchor="middle">90</text>
+          <text x="128" y="228" text-anchor="middle">60</text>
+          <text x="186" y="228" text-anchor="middle">45</text>
+          <text x="243" y="228" text-anchor="middle">30</text>
+          <text x="301" y="228" text-anchor="middle">21</text>
+          <text x="359" y="228" text-anchor="middle">14</text>
+          <text x="417" y="228" text-anchor="middle">7</text>
+          <text x="474" y="228" text-anchor="middle">3</text>
+          <text x="532" y="228" text-anchor="middle">1</text>
+          <text x="590" y="228" text-anchor="middle">0</text>
+          <text x="330" y="248" text-anchor="middle">days before stay →</text>
+        </g>
+      </svg>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--teal)"></span>hotel_C (0.30 → 0.17)</span>
+        <span><span class="sw" style="background:var(--brass)"></span>hotel_H (0.11 → 0.44, peaking 0.48 at 1d)</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="coldstart">
+  <div class="wrap">
+    <div class="kicker"><span class="num">04</span></div>
+    <h2>Cold start, and the interval that tells the truth about it.</h2>
+    <p>hotel_H is a mountain resort whose busy season is entirely unseen in its own training window — and no other resort-mountain property with reservation history exists to borrow a season shape from. Rather than mask that, I measured exactly how it shows up in the prediction intervals.</p>
+
+    <h3>P10 / P90 coverage, test window</h3>
+    <div class="coverage">
+      <div class="cov-bar">
+        <div class="cov-seg cov-below" style="flex:7"></div>
+        <div class="cov-seg cov-in" style="flex:39">39%</div>
+        <div class="cov-seg cov-above" style="flex:54">54%</div>
+      </div>
+      <div class="legend" style="margin-top:10px;">
+        <span><span class="sw" style="background:var(--ink-soft)"></span>below p10 — 7%</span>
+        <span><span class="sw" style="background:var(--teal)"></span>within interval — 39%</span>
+        <span><span class="sw" style="background:var(--warn)"></span>above p90 — 54%</span>
+      </div>
+      <div class="cov-target">Target for an 80% interval: ~80% within, ~10% on each side. In-distribution (train-window, out-of-fold): 90%.</div>
+    </div>
+    <div class="callout">
+      <strong>Reported, not tuned away:</strong> conformal calibration gets in-distribution coverage to 90% — the machinery works. On the true Jul–Sep window it drops to 39%, one-sided, because the bias is in the <em>median</em> (under-anchored on an unseen season), and a symmetric interval can't fully correct a biased center. I widened intervals for out-of-season dates and it helped only marginally — confirming the diagnosis rather than fixing it. The real fix is structural: a seasonal-calendar feature, and conformal calibration pooled across same-<code>region_type</code> hotels once more exist.
+    </div>
+  </div>
+</section>
+
+<section id="next">
+  <div class="wrap">
+    <div class="kicker"><span class="num">05</span></div>
+    <h2>What I'd build next, in order</h2>
+    <ul class="tight">
+      <li><strong>A <code>season_calendar</code> reference table</strong> (peak/shoulder/low by month, from RM ops or a comp-set history) — the single highest-leverage fix for the hotel_H-shaped cold-start gap, and the one piece of context this dataset deliberately withholds.</li>
+      <li><strong>Cross-hotel-family conformal calibration</strong> — pool residuals across hotels sharing a <code>region_type</code> once there are enough of them, so a resort-mountain property's intervals stop leaning on a resort-coastal hotel's calibration.</li>
+      <li><strong>An off-policy read on <code>suggested_prices</code></strong> as the historical action — the stretch goal I didn't get to, gated behind more validation-window data than this extract provides.</li>
+      <li><strong>Switchback A/B against <code>expected_booking_curves</code></strong> in production, hotel as a random effect — laid out in full in <code>DESIGN.md</code> §6.6.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Full write-up: <code>DESIGN.md</code> · code: <code>src/</code> · reproduce: <code>evaluation/compare_production.py</code></span>
+    <span>predict_booking_curve(hotel_id, room_type_code, stay_date, as_of_date=None)</span>
+  </div>
+</footer>

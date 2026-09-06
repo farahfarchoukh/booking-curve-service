@@ -1,0 +1,81 @@
+{
+  "cat_categories": {
+    "country": [
+      "AU",
+      "CA",
+      "MX",
+      "NZ",
+      "US",
+      "unknown"
+    ],
+    "currency": [
+      "AUD",
+      "CAD",
+      "MXN",
+      "NZD",
+      "USD",
+      "unknown"
+    ],
+    "pms_type": [
+      "agora",
+      "cms",
+      "unknown"
+    ],
+    "primary_rate_mode": [
+      "average",
+      "lowest",
+      "unknown"
+    ],
+    "region_type": [
+      "regional",
+      "resort_coastal",
+      "resort_mountain",
+      "unknown",
+      "urban_core",
+      "urban_outer"
+    ],
+    "room_type_kind": [
+      "derived",
+      "optimized",
+      "unknown"
+    ]
+  },
+  "level_shrink": {
+    "hotel_C": -0.059061524870599846,
+    "hotel_H": -0.16414844849332424
+  },
+  "shape_shrink": {
+    "hotel_C": 0.0014548551535808842,
+    "hotel_H": -0.04966477483561012
+  },
+  "level_shrink_k": 15.0,
+  "shape_shrink_k": 30.0,
+  "hotel_n_obs": {
+    "hotel_C": 1463,
+    "hotel_H": 40
+  },
+  "interval_widen_k": 1.5,
+  "level_q_shift": {
+    "0.1": -0.008168586589596388,
+    "0.5": 0.0,
+    "0.9": 0.0
+  },
+  "train_doy_range": [
+    88,
+    181
+  ],
+  "extrapolation_gamma": 1.0,
+  "quantiles": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "extra": {
+    "level_rounds": 75,
+    "shape_rounds": 53,
+    "train_end": "2025-06-30",
+    "val_start": "2025-06-09",
+    "n_level_rows": 1503,
+    "n_shape_rows": 13527
+  }
+}
