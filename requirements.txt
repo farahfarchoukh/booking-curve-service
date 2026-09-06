@@ -1,11 +1,15 @@
 # Self-sufficient, pinned dependency set — does not assume any other
-# package's requirements.txt exists alongside it. Pinned to exact versions
-# resolved and verified inside the Dockerfile's python:3.11-slim image
-# (docker build, then `pip freeze` inside the container) — not just
-# whatever a local dev shell happens to have. A first pass here pinned
-# numpy==2.5.2, which doesn't exist for Python 3.11 at all (only 3.12+);
-# that only surfaced by actually running `docker build`, which is exactly
-# why it's worth doing instead of trusting a local venv on a newer Python.
+# package's requirements.txt exists alongside it. Originally pinned to
+# exact versions resolved and verified inside the Dockerfile's
+# python:3.11-slim image (docker build, then `pip freeze` inside the
+# container) — not just whatever a local dev shell happens to have. A
+# first pass here pinned numpy==2.5.2, which doesn't exist for Python 3.11
+# at all (only 3.12+); that only surfaced by actually running
+# `docker build`, which is exactly why it's worth doing instead of
+# trusting a local venv on a newer Python. numpy was later bumped to
+# 2.4.6 by Dependabot (now targeting the 3.14-slim base image — see
+# Dockerfile) and re-verified the same way, end to end, not just merged
+# on green CI.
 # `requirements-dev.txt` adds test/lint/API/notebook tooling on top of
 # this — not needed to train, predict, or evaluate.
 pandas==3.0.5
