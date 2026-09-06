@@ -9,6 +9,6 @@
 # `requirements-dev.txt` adds test/lint/API/notebook tooling on top of
 # this — not needed to train, predict, or evaluate.
 pandas==3.0.5
-numpy==2.3.5
+numpy==2.4.6
 scikit-learn==1.9.0
 lightgbm==4.7.0
