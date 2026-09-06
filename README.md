@@ -12,13 +12,13 @@ The interesting part of this problem was never "fit a curve to one hotel's histo
 
 ```mermaid
 flowchart LR
-    A["Onboarding attributes<br/>+ calendar<br/>(no hotel_id)"] --> B["Level model<br/>final occupancy"]
-    A --> C["Shape model<br/>pace g(cp), cp monotonic"]
-    B --> D["y = level x g(cp)"]
+    A["Onboarding attributes plus calendar, no hotel_id"] --> B["Level model: final occupancy"]
+    A --> C["Shape model: pace g of cp, monotonic in cp"]
+    B --> D["y equals level times g of cp"]
     C --> D
-    D --> E["Clip + cummax<br/>constraint enforcement"]
-    E --> F["Booking curve<br/>0 violations, by construction"]
-    G["Per-hotel shrinkage<br/>+ conformal calibration"] -.-> B
+    D --> E["Clip plus cummax: constraint enforcement"]
+    E --> F["Booking curve: zero violations, by construction"]
+    G["Per-hotel shrinkage plus conformal calibration"] -.-> B
     G -.-> C
 ```
 
