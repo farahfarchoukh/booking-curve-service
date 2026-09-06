@@ -31,15 +31,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Only the dependency manifest first, so the (slow) pip install layer is
-# cached across rebuilds that only touch application code.
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-# uvicorn/fastapi/pydantic are needed for the serving CMD below even
-# though they're a "dev" concern in requirements-dev.txt locally — the
-# runtime image needs them unconditionally to serve anything.
-RUN pip install --no-cache-dir fastapi==0.141.1 uvicorn==0.52.4 pydantic==2.13.5
+# Only the dependency manifests first, so the (slow) pip install layer is
+# cached across rebuilds that only touch application code. requirements-api.txt
+# (fastapi/uvicorn/pydantic/prometheus-client/slowapi) is the same file
+# requirements-dev.txt pulls in locally — one set of pinned versions, not
+# two copies to keep in sync by hand.
+COPY requirements.txt requirements-api.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-api.txt
 
 COPY src/ src/
 COPY evaluation/evaluate.py evaluation/evaluate.py

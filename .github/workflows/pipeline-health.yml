@@ -1,0 +1,47 @@
+# A gap the regular CI workflow can't close: ci.yml never trains a model
+# (there's no real data for a hosted runner to train on — see README
+# "Data"), so a dependency update or a refactor could silently break
+# `train` -> `predict` -> `evaluate` without any workflow ever noticing,
+# right up until someone tries it against the real dataset by hand.
+#
+# This runs that full chain against the synthetic demo dataset on a
+# schedule, independent of any code push. It proves the *pipeline* stays
+# functional over time — it says nothing about model *quality* (the demo
+# data's whole point is that it's synthetic, not a quality signal) and
+# nothing here should ever be read as "the model still performs well."
+name: Pipeline health check
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch: {} # or run it on demand from the Actions tab
+
+jobs:
+  synthetic-pipeline-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+
+      - run: python -m scripts.generate_demo_data --out demo_data
+      - run: python -m src.train --data-dir demo_data --out demo_artifacts
+      - run: |
+          python -m src.predict --data-dir demo_data --model-dir demo_artifacts \
+            --hotel-id hotel_X --room-type-code rt_x1 --stay-date 2025-08-15
+      - run: |
+          python -m src.predict --data-dir demo_data --model-dir demo_artifacts \
+            --hotel-id hotel_Z --room-type-code rt_z --stay-date 2025-08-15
+      - name: serve and hit it over real HTTP
+        run: |
+          BOOKING_CURVE_DATA_DIR=$(pwd)/demo_data \
+          BOOKING_CURVE_MODEL_BASE_DIR=$(pwd)/demo_artifacts \
+            uvicorn src.api:app --host 127.0.0.1 --port 8000 &
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8000/readyz && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/readyz
+          curl -sf "http://127.0.0.1:8000/v1/booking-curve?hotel_id=hotel_X&room_type_code=rt_x1&stay_date=2025-08-15"

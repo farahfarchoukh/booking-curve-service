@@ -1,11 +1,11 @@
-# Everything beyond requirements.txt: the FastAPI stretch demo, the test
-# suite, linting, and re-executing notebooks/exploration.ipynb from scratch.
-# Nothing in `src/train.py` / `src/predict.py` / `evaluation/evaluate.py`
-# needs any of this — see README "What's implemented" for the split.
+# Everything beyond requirements.txt: the API service, its test suite,
+# linting, and re-executing notebooks/exploration.ipynb from scratch.
+# Nothing in `src/train.py` / `evaluation/evaluate.py` needs any of this —
+# see README "What's implemented" for the split. requirements-api.txt is
+# also what the Dockerfile installs into the runtime image — one file,
+# not two copies of the same versions to keep in sync by hand.
 -r requirements.txt
-fastapi==0.141.1
-uvicorn==0.52.4
-pydantic==2.13.5
+-r requirements-api.txt
 httpx==0.28.1
 pytest==9.1.1
 pytest-cov==7.1.0

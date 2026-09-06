@@ -1,0 +1,11 @@
+# Everything the *runtime* container needs to serve, beyond
+# requirements.txt's ML core. Split out from requirements-dev.txt so the
+# Dockerfile can install exactly this — the container has no business with
+# pytest/ruff/notebook tooling, and duplicating these versions by hand
+# inside the Dockerfile (the previous approach) is exactly the kind of
+# thing that quietly drifts from what's actually tested.
+fastapi==0.141.1
+uvicorn==0.52.4
+pydantic==2.13.5
+prometheus-client==0.26.0
+slowapi==0.1.10
