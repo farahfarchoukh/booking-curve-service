@@ -240,13 +240,37 @@ class BookingCurveModel:
         return self._fix_categories(X)[SHAPE_FEATURES]
 
     # ---- raw model outputs (no shrink, no constraints) ---------------
-    def predict_level_raw(self, static, df: pd.DataFrame) -> np.ndarray:
-        X = self._level_matrix(static, df)
+    def predict_level_raw(self, static, df: pd.DataFrame, X: pd.DataFrame | None = None) -> np.ndarray:
+        """`X` lets a caller pass an already-built level matrix instead of
+        rebuilding one — see `_level_raw_and_quantiles`, which is what
+        both the single-curve and batch prediction paths actually use
+        (this method mainly still exists for direct/test use)."""
+        if X is None:
+            X = self._level_matrix(static, df)
         return self.level_booster.predict(X)
 
-    def predict_level_quantiles_raw(self, static, df: pd.DataFrame) -> dict:
-        X = self._level_matrix(static, df)
+    def predict_level_quantiles_raw(self, static, df: pd.DataFrame, X: pd.DataFrame | None = None) -> dict:
+        if X is None:
+            X = self._level_matrix(static, df)
         return {q: booster.predict(X) for q, booster in self.level_q_boosters.items()}
+
+    def _level_raw_and_quantiles(self, static, df: pd.DataFrame) -> tuple[np.ndarray, dict]:
+        """Builds the level feature matrix ONCE and predicts from the
+        point booster and all three quantile boosters against it.
+
+        This exists because profiling predict_booking_curve found the
+        level matrix was being built TWICE per request — once each in
+        the old separate predict_level_raw / predict_level_quantiles_raw
+        call sites, for the identical row — and that matrix build
+        (feature engineering + categorical-dtype coercion) cost roughly
+        as much wall-clock time as the actual LightGBM inference calls
+        combined. Same math, same 4 booster.predict() calls either way;
+        this just stops rebuilding the shared input twice.
+        """
+        X = self._level_matrix(static, df)
+        raw_level = self.predict_level_raw(static, df, X=X)
+        raw_quantiles = self.predict_level_quantiles_raw(static, df, X=X)
+        return raw_level, raw_quantiles
 
     def predict_shape_raw(self, static, df_long: pd.DataFrame) -> np.ndarray:
         X = self._shape_matrix(static, df_long)
@@ -282,22 +306,23 @@ class BookingCurveModel:
         room_corr = self.room_shape_shrink.get(room_key(hotel_id, room_type_code), 0.0)
         return hotel_corr + room_corr
 
-    def _corrected_level(self, static, hotel_id: str, room_type_code: str, stay_date) -> float:
+    def _corrected_level_and_quantiles(self, static, hotel_id: str, room_type_code: str, stay_date) -> tuple[float, dict]:
+        """Point final-occupancy estimate and its P10/P50/P90, from a
+        single shared level-matrix build (see `_level_raw_and_quantiles`
+        for why that matters for latency) — replaces what used to be two
+        separate methods (`_corrected_level` / `_corrected_level_quantiles`)
+        that each built and predicted from their own identical copy of
+        this row's features."""
         row = pd.DataFrame(
             {"hotel_id": [hotel_id], "room_type_code": [room_type_code], "stay_date": [stay_date]}
         )
-        raw = float(self.predict_level_raw(static, row)[0])
-        damp = float(self._extrapolation_correction_damp(pd.Series([stay_date]))[0])
-        corr = self._level_correction(hotel_id, room_type_code) * damp
-        return float(np.clip(raw + corr, 0.0, 1.0))
+        raw_level, raw_quantiles = self._level_raw_and_quantiles(static, row)
 
-    def _corrected_level_quantiles(self, static, hotel_id, room_type_code, stay_date) -> dict:
-        row = pd.DataFrame(
-            {"hotel_id": [hotel_id], "room_type_code": [room_type_code], "stay_date": [stay_date]}
-        )
-        raw = self.predict_level_quantiles_raw(static, row)
         damp = float(self._extrapolation_correction_damp(pd.Series([stay_date]))[0])
         corr = self._level_correction(hotel_id, room_type_code) * damp
+
+        y_final = float(np.clip(raw_level[0] + corr, 0.0, 1.0))
+
         n = self.hotel_n_obs.get(hotel_id, 0)
         widen = (1.0 + self.interval_widen_k / np.sqrt(n + 1)) * float(
             self._extrapolation_widen(pd.Series([stay_date]))[0]
@@ -306,13 +331,13 @@ class BookingCurveModel:
         # pinball-loss booster), then per-hotel recentering, then widen for
         # hotels we have little of our own data on / dates outside the
         # training season.
-        med = float(np.clip(raw[0.5][0] + self.level_q_shift.get(0.5, 0.0) + corr, 0.0, 1.0))
-        lo = float(np.clip(raw[0.1][0] + self.level_q_shift.get(0.1, 0.0) + corr, 0.0, 1.0))
-        hi = float(np.clip(raw[0.9][0] + self.level_q_shift.get(0.9, 0.0) + corr, 0.0, 1.0))
+        med = float(np.clip(raw_quantiles[0.5][0] + self.level_q_shift.get(0.5, 0.0) + corr, 0.0, 1.0))
+        lo = float(np.clip(raw_quantiles[0.1][0] + self.level_q_shift.get(0.1, 0.0) + corr, 0.0, 1.0))
+        hi = float(np.clip(raw_quantiles[0.9][0] + self.level_q_shift.get(0.9, 0.0) + corr, 0.0, 1.0))
         lo = float(np.clip(med - (med - lo) * widen, 0.0, 1.0))
         hi = float(np.clip(med + (hi - med) * widen, 0.0, 1.0))
         lo, hi = min(lo, hi), max(lo, hi)
-        return {"p10": lo, "p50": med, "p90": hi}
+        return y_final, {"p10": lo, "p50": med, "p90": hi}
 
     def _corrected_shape(self, static, hotel_id: str, room_type_code: str, stay_date) -> dict:
         rows = pd.DataFrame(
@@ -363,12 +388,11 @@ class BookingCurveModel:
         """Full blind (no as_of anchoring) predicted curve, constraint-
         enforced. Returns {'point': {...}, 'p10': {...}, 'p50': {...},
         'p90': {...}, 'diagnostics': {...}}."""
-        y_final = self._corrected_level(static, hotel_id, room_type_code, stay_date)
+        y_final, q = self._corrected_level_and_quantiles(static, hotel_id, room_type_code, stay_date)
         g = self._corrected_shape(static, hotel_id, room_type_code, stay_date)
         point_raw = {cp: y_final * g[cp] for cp in CHECKPOINTS}
         point = enforce_curve_constraints(CHECKPOINTS, [point_raw[c] for c in CHECKPOINTS])
 
-        q = self._corrected_level_quantiles(static, hotel_id, room_type_code, stay_date)
         intervals = {}
         for key in ("p10", "p50", "p90"):
             raw = {cp: q[key] * g[cp] for cp in CHECKPOINTS}
@@ -415,7 +439,7 @@ class BookingCurveModel:
         room_types = keys["room_type_code"].tolist()
         room_keys = [room_key(h, r) for h, r in zip(hotel_ids, room_types)]
 
-        level_raw = self.predict_level_raw(static, keys)
+        level_raw, q_raw = self._level_raw_and_quantiles(static, keys)
         level_corr_raw = np.array(
             [
                 self.level_shrink.get(h, 0.0) + self.room_level_shrink.get(rk, 0.0)
@@ -426,7 +450,6 @@ class BookingCurveModel:
         level_corr = level_corr_raw * damp
         y_final = np.clip(level_raw + level_corr, 0.0, 1.0)
 
-        q_raw = self.predict_level_quantiles_raw(static, keys)
         n_obs = np.array([self.hotel_n_obs.get(h, 0) for h in hotel_ids])
         widen = (1.0 + self.interval_widen_k / np.sqrt(n_obs + 1)) * self._extrapolation_widen(
             keys["stay_date"]
