@@ -1,0 +1,316 @@
+{
+  "stage1_gamma_search": [
+    {
+      "gamma": 0.0,
+      "n_checkpoints_scored": 22990,
+      "picp": 0.5116,
+      "share_below_p10": 0.1184,
+      "share_above_p90": 0.37,
+      "mean_interval_width": 0.2926,
+      "mean_pinball_loss": 0.091,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0563,
+        "p50": 0.1131,
+        "p90": 0.1037
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.5447,
+          "share_below_p10": 0.0794,
+          "share_above_p90": 0.3759,
+          "n": 14800
+        },
+        "hotel_H": {
+          "picp": 0.4518,
+          "share_below_p10": 0.1888,
+          "share_above_p90": 0.3595,
+          "n": 8190
+        }
+      }
+    },
+    {
+      "gamma": 1.0,
+      "n_checkpoints_scored": 22990,
+      "picp": 0.6108,
+      "share_below_p10": 0.0595,
+      "share_above_p90": 0.3297,
+      "mean_interval_width": 0.4747,
+      "mean_pinball_loss": 0.0855,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0532,
+        "p50": 0.1121,
+        "p90": 0.0913
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.6354,
+          "share_below_p10": 0.0268,
+          "share_above_p90": 0.3378,
+          "n": 14800
+        },
+        "hotel_H": {
+          "picp": 0.5663,
+          "share_below_p10": 0.1187,
+          "share_above_p90": 0.315,
+          "n": 8190
+        }
+      }
+    },
+    {
+      "gamma": 2.0,
+      "n_checkpoints_scored": 22990,
+      "picp": 0.6545,
+      "share_below_p10": 0.0317,
+      "share_above_p90": 0.3138,
+      "mean_interval_width": 0.5371,
+      "mean_pinball_loss": 0.0845,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0543,
+        "p50": 0.1123,
+        "p90": 0.0869
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.661,
+          "share_below_p10": 0.0161,
+          "share_above_p90": 0.3228,
+          "n": 14800
+        },
+        "hotel_H": {
+          "picp": 0.6427,
+          "share_below_p10": 0.0598,
+          "share_above_p90": 0.2974,
+          "n": 8190
+        }
+      }
+    },
+    {
+      "gamma": 3.0,
+      "n_checkpoints_scored": 22990,
+      "picp": 0.6766,
+      "share_below_p10": 0.0204,
+      "share_above_p90": 0.303,
+      "mean_interval_width": 0.5683,
+      "mean_pinball_loss": 0.0837,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0547,
+        "p50": 0.1124,
+        "p90": 0.0839
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.6751,
+          "share_below_p10": 0.0111,
+          "share_above_p90": 0.3138,
+          "n": 14800
+        },
+        "hotel_H": {
+          "picp": 0.6794,
+          "share_below_p10": 0.0371,
+          "share_above_p90": 0.2835,
+          "n": 8190
+        }
+      }
+    },
+    {
+      "gamma": 5.0,
+      "n_checkpoints_scored": 22990,
+      "picp": 0.697,
+      "share_below_p10": 0.0113,
+      "share_above_p90": 0.2916,
+      "mean_interval_width": 0.5961,
+      "mean_pinball_loss": 0.0828,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0544,
+        "p50": 0.1129,
+        "p90": 0.0811
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.6897,
+          "share_below_p10": 0.0071,
+          "share_above_p90": 0.3032,
+          "n": 14800
+        },
+        "hotel_H": {
+          "picp": 0.7104,
+          "share_below_p10": 0.0189,
+          "share_above_p90": 0.2707,
+          "n": 8190
+        }
+      }
+    }
+  ],
+  "best_gamma": 5.0,
+  "stage2_widen_k_search": [
+    {
+      "widen_k": 1.0,
+      "n_checkpoints_scored": 22990,
+      "picp": 0.6966,
+      "share_below_p10": 0.0118,
+      "share_above_p90": 0.2916,
+      "mean_interval_width": 0.5945,
+      "mean_pinball_loss": 0.0828,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0544,
+        "p50": 0.1129,
+        "p90": 0.0811
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.6895,
+          "share_below_p10": 0.0072,
+          "share_above_p90": 0.3032,
+          "n": 14800
+        },
+        "hotel_H": {
+          "picp": 0.7093,
+          "share_below_p10": 0.02,
+          "share_above_p90": 0.2707,
+          "n": 8190
+        }
+      }
+    },
+    {
+      "widen_k": 1.5,
+      "n_checkpoints_scored": 22990,
+      "picp": 0.697,
+      "share_below_p10": 0.0113,
+      "share_above_p90": 0.2916,
+      "mean_interval_width": 0.5961,
+      "mean_pinball_loss": 0.0828,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0544,
+        "p50": 0.1129,
+        "p90": 0.0811
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.6897,
+          "share_below_p10": 0.0071,
+          "share_above_p90": 0.3032,
+          "n": 14800
+        },
+        "hotel_H": {
+          "picp": 0.7104,
+          "share_below_p10": 0.0189,
+          "share_above_p90": 0.2707,
+          "n": 8190
+        }
+      }
+    },
+    {
+      "widen_k": 2.5,
+      "n_checkpoints_scored": 22990,
+      "picp": 0.6977,
+      "share_below_p10": 0.0106,
+      "share_above_p90": 0.2916,
+      "mean_interval_width": 0.5986,
+      "mean_pinball_loss": 0.0829,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0545,
+        "p50": 0.1129,
+        "p90": 0.0811
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.6901,
+          "share_below_p10": 0.0067,
+          "share_above_p90": 0.3032,
+          "n": 14800
+        },
+        "hotel_H": {
+          "picp": 0.7116,
+          "share_below_p10": 0.0177,
+          "share_above_p90": 0.2707,
+          "n": 8190
+        }
+      }
+    },
+    {
+      "widen_k": 4.0,
+      "n_checkpoints_scored": 22990,
+      "picp": 0.699,
+      "share_below_p10": 0.0093,
+      "share_above_p90": 0.2916,
+      "mean_interval_width": 0.6015,
+      "mean_pinball_loss": 0.0829,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0546,
+        "p50": 0.1129,
+        "p90": 0.0811
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.6905,
+          "share_below_p10": 0.0062,
+          "share_above_p90": 0.3032,
+          "n": 14800
+        },
+        "hotel_H": {
+          "picp": 0.7144,
+          "share_below_p10": 0.0149,
+          "share_above_p90": 0.2707,
+          "n": 8190
+        }
+      }
+    }
+  ],
+  "best_widen_k": 1.0,
+  "official_split_disclosure": {
+    "chosen": {
+      "n_checkpoints_scored": 25210,
+      "picp": 0.6684,
+      "share_below_p10": 0.0113,
+      "share_above_p90": 0.3203,
+      "mean_interval_width": 0.5156,
+      "mean_pinball_loss": 0.0841,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0553,
+        "p50": 0.1058,
+        "p90": 0.091
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.7226,
+          "share_below_p10": 0.0191,
+          "share_above_p90": 0.2583,
+          "n": 14930
+        },
+        "hotel_H": {
+          "picp": 0.5896,
+          "share_below_p10": 0.0,
+          "share_above_p90": 0.4104,
+          "n": 10280
+        }
+      }
+    },
+    "current_shipped": {
+      "n_checkpoints_scored": 25210,
+      "picp": 0.6237,
+      "share_below_p10": 0.0339,
+      "share_above_p90": 0.3424,
+      "mean_interval_width": 0.4384,
+      "mean_pinball_loss": 0.0877,
+      "pinball_loss_by_quantile": {
+        "p10": 0.0592,
+        "p50": 0.1061,
+        "p90": 0.0979
+      },
+      "by_hotel": {
+        "hotel_C": {
+          "picp": 0.669,
+          "share_below_p10": 0.0573,
+          "share_above_p90": 0.2737,
+          "n": 14930
+        },
+        "hotel_H": {
+          "picp": 0.558,
+          "share_below_p10": 0.0,
+          "share_above_p90": 0.442,
+          "n": 10280
+        }
+      }
+    }
+  }
+}
