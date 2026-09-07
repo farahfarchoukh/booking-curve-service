@@ -258,7 +258,7 @@ def get_price_recommendation(
 ):
     """Pace-based yield adjustment — see src/pricing.py's module docstring
     for exactly what this is (and, importantly, isn't: no learned price
-    elasticity, see DESIGN.md SS6.10/SS6.12). Unlike /booking-curve,
+    elasticity, see VALIDATION.md SS6.10/SS6.12). Unlike /booking-curve,
     as_of_date is required here: without a live pickup signal there's
     nothing for this endpoint to react to, by design, not by omission."""
     if state.model is None:

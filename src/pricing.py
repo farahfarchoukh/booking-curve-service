@@ -11,7 +11,7 @@ learned from it mostly reflects the pricer's own demand-responsiveness
 customer's actual response to price. Fitting "optimal price" as a
 supervised regression against that history would launder that reverse
 causality straight into a model and call the result ML pricing. It
-wouldn't be one, and DESIGN.md §6.10/§6.11 already commit to not
+wouldn't be one, and VALIDATION.md §6.10/VALIDATION.md §6.11 already commit to not
 shipping that.
 
 What this DOES do, which the data fully supports: react to how a stay's
@@ -19,13 +19,13 @@ ACTUAL booking pace compares to the model's OWN expectation for this
 exact lead time (days-until-stay) — a pace-deviation signal, the same
 one classical (non-ML) revenue-management systems have used for decades,
 except here "expectation" comes from a real, honestly-validated ML
-demand forecast (this project's booking-curve model, §6.9) instead of a
+demand forecast (this project's booking-curve model, VALIDATION.md §6.9) instead of a
 hand-fit parametric curve. Running ahead of pace -> scarcity -> raise
 price. Running behind -> raise the discount to stimulate demand. This
 only requires the forecast to predict "how fast a stay like this
 normally fills up," which has been validated end-to-end. It does NOT
 require knowing how customers respond to price, which is exactly the
-piece §6.10 found isn't supportable here — so this module never claims
+piece VALIDATION.md §6.10 found isn't supportable here — so this module never claims
 to know that, and never tries to learn it.
 
 Confidence gating: the adjustment is scaled by the model's own
@@ -33,7 +33,7 @@ calibrated P10/P90 interval width at the stay date — not a new metric
 invented for pricing. A thin or out-of-season hotel (hotel_H-shaped)
 gets a wide interval, and its pace signal is dampened toward "don't move
 the price much, this forecast isn't trustworthy enough to act on
-aggressively" — the `low_confidence` guardrail DESIGN.md §6.2/§6.11
+aggressively" — the `low_confidence` guardrail DESIGN.md §6.2/VALIDATION.md §6.11
 already calls for, now actually wired to something.
 
 Bounds: capped at +/-25%, chosen by looking at the empirical range of
@@ -51,7 +51,7 @@ against expectation). For a stay with no bookings yet there's no pace to
 react to, and this returns the base rate unadjusted with an explicit
 reason rather than inventing a signal from nothing.
 
-See DESIGN.md §6.12 for the full design discussion and its own honest
+See VALIDATION.md §6.12 for the full design discussion and its own honest
 GO/NO-GO — this is a recommendation-and-guardrail tool for a human
 pricing decision, not an autonomous pricing engine.
 """

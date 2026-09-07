@@ -2,7 +2,7 @@
 evaluation/calibration_tuning.py searched for a single EXTRAPOLATION_GAMMA
 and never converged — pinball loss kept improving to the edge of the
 tested range. The diagnosis (recorded in that script's output and
-DESIGN.md §6.11): the widening mechanism was symmetric (P10 and P90 widen
+VALIDATION.md §6.11): the widening mechanism was symmetric (P10 and P90 widen
 by the same factor) while the actual miscalibration is one-sided (actuals
 miss high far more than low), so a shared knob has to over-widen the low
 side just to stretch the high side far enough — a structurally inefficient

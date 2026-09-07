@@ -103,7 +103,7 @@ B/C look worse than A here because this table predates the extrapolation-damping
 | 3.0 | 67.7% | 0.0837 | 0.568 |
 | 5.0 | 69.7% | 0.0828 | 0.596 |
 
-**Did not converge** — pinball loss kept improving to the edge of the tested range. Not shipped (see DESIGN.md §6.11 for why: this is a symptom of a symmetric mechanism fighting a one-sided miscalibration, not evidence that gamma=5 is correct).
+**Did not converge** — pinball loss kept improving to the edge of the tested range. Not shipped (see VALIDATION.md §6.11 for why: this is a symptom of a symmetric mechanism fighting a one-sided miscalibration, not evidence that gamma=5 is correct).
 
 **Stage 2 — `interval_widen_k`** (gamma fixed at 5.0): essentially flat (0.0828–0.0829 pinball across k=1.0–4.0) — negligible signal once gamma dominates.
 
@@ -176,8 +176,8 @@ Fix: `model.py` was building the level feature matrix twice per request (point e
 | Price vs. occupancy, `pricer_type=derived` | 299 | 0.098 | 0.092 |
 | Price vs. occupancy, `pricer_type=optimized` | 24 | 0.526 | **0.008** |
 
-The one significant result (optimized room, n=24) is positive — the reverse-causality signature of a demand-responsive pricer, not a discovered demand curve (DESIGN.md §6.10). No result here supports a learned elasticity model.
+The one significant result (optimized room, n=24) is positive — the reverse-causality signature of a demand-responsive pricer, not a discovered demand curve (VALIDATION.md §6.10). No result here supports a learned elasticity model.
 
 ## How the final model was actually selected
 
-Not by picking the best number on the official test set. In order: (1) architecture (level x shape vs. single-model) settled by table 7's nested comparison; (2) correction layers (hotel shrink, room-type shrink, quantization, extrapolation damping) each added only after an honest OOF or ablation read justified them (table 5, DESIGN.md §6.8); (3) `extrapolation_gamma`/`interval_widen_k` deliberately left at their pre-existing values rather than the table-6 search result, because that search didn't converge — shipping an edge-of-grid number would have been worse than documenting the gap; (4) the official Jul–Sep split appears in this document only for disclosure (tables 1, 6, 7) or as one of four equally-weighted folds (table 4) — never as the criterion a choice was made against.
+Not by picking the best number on the official test set. In order: (1) architecture (level x shape vs. single-model) settled by table 7's nested comparison; (2) correction layers (hotel shrink, room-type shrink, quantization, extrapolation damping) each added only after an honest OOF or ablation read justified them (table 5, VALIDATION.md §6.8); (3) `extrapolation_gamma`/`interval_widen_k` deliberately left at their pre-existing values rather than the table-6 search result, because that search didn't converge — shipping an edge-of-grid number would have been worse than documenting the gap; (4) the official Jul–Sep split appears in this document only for disclosure (tables 1, 6, 7) or as one of four equally-weighted folds (table 4) — never as the criterion a choice was made against.

@@ -11,7 +11,7 @@ That split matters methodologically: fold 2 of rolling_backtest.py
 (train <= 2025-06-30, test = Jul) uses the exact train cutoff the shipped
 model ships with, and Jul-Sep is the window every other number in this
 repo is reported against. Tuning against it would be the identical
-mistake already caught once this project (see DESIGN.md §6.8's
+mistake already caught once this project (see VALIDATION.md §6.8's
 MIN_ROOM_N_FOR_POOLING). So this tunes ONLY on folds 1/3/4 (Jun/Aug/Sep,
 train cutoffs May 31 / Jul 31 / Aug 31) and reports the winning
 configuration's performance on the official split afterward, once, for

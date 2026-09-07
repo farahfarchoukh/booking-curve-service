@@ -1,10 +1,10 @@
 """
 Walkthrough of src/pricing.py against real Ampliphi data — not an
 accuracy benchmark. There is no ground truth in this dataset for "was
-this the right price" (§6.10: no genuine price experimentation exists
+this the right price" (VALIDATION.md §6.10: no genuine price experimentation exists
 here), so unlike evaluate.py/interval_metrics.py this script does not,
 and should not, produce a score. What it demonstrates instead: the
-mechanism behaves the way DESIGN.md §6.12 says it does, on real stays —
+mechanism behaves the way VALIDATION.md §6.12 says it does, on real stays —
 ahead-of-pace raises price, behind-pace discounts, a thin/uncertain
 hotel gets dampened toward no change, and a stay with no live pickup yet
 holds at base rate rather than inventing a signal.
@@ -68,7 +68,7 @@ def main():
         "\nNote: every real hotel_C/hotel_H stay in this dataset with actual pickup"
         " history to demo against falls in Jul-Sep — which is entirely outside the"
         " Mar-Jun training window (train ends before test begins, by this project's"
-        " own split). That's exactly the extrapolation regime DESIGN.md §6.7/§6.8"
+        " own split). That's exactly the extrapolation regime DESIGN.md §6.7 / VALIDATION.md §6.8"
         " already documents as low-confidence, so most scenarios above correctly"
         " show confidence near 0 and barely move off base_rate — the guardrail"
         " engaging, not a bug. The first scenario (an in-season May date) shows"

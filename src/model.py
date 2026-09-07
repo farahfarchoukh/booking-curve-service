@@ -183,7 +183,7 @@ class BookingCurveModel:
         self.extrapolation_gamma = extrapolation_gamma
         # Asymmetric widening: the P90 side and the P10 side get their own
         # gamma, because the actual miscalibration is one-sided (actuals
-        # miss high far more than low — DESIGN.md §6.7/§6.8) while a single
+        # miss high far more than low — DESIGN.md §6.7 / VALIDATION.md §6.8) while a single
         # shared gamma widens both sides equally. A nested-CV search over
         # one shared gamma (evaluation/calibration_tuning.py) never
         # converged — pinball loss kept improving to the edge of the tested
