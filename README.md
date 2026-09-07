@@ -30,6 +30,8 @@ flowchart LR
 
 `presentation/index.html` — open it directly in a browser (self-contained, no server needed). Covers the same ground as this README and `DESIGN.md` in a more visual form: the 8-hotel heterogeneity problem, the level+shape architecture, results vs. baseline and production curve, and the honest cold-start/interval-coverage finding.
 
+`EXPERIMENTS.md` — every experiment this project ran (seed sensitivity, walk-forward backtest, ablation, architecture comparison, calibration search, latency before/after), each traceable to a checked-in script and JSON file, plus the actual model-selection logic tying them together — not just the headline number.
+
 ## Results
 
 Test window: 2025-07-01 → 2025-09-30, `hotel_C` + `hotel_H`, scored by `evaluation/evaluate.py` (Ampliphi's own scoring harness). Numbers below are from the exact artifact shipped in `artifacts/model/` — training is deterministic (see "Engineering hardening"), so re-running `python -m src.train` reproduces this artifact byte-for-byte rather than drifting run to run.
