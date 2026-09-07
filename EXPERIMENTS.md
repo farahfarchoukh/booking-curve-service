@@ -114,6 +114,33 @@ B/C look worse than A here because this table predates the extrapolation-damping
 | Shipped (gamma=1.0, k=1.5) | 62.4% | 0.0877 | 0.438 |
 | Searched (gamma=5.0, k=1.0) | 66.8% | 0.0841 | 0.516 |
 
+### 6b. Follow-up — decoupled (asymmetric) widening
+
+`evaluation/asymmetric_calibration_tuning.py`. `extrapolation_gamma_lo`/`_hi` split into independent terms (`model.py`, shipped); `gamma_hi` searched over a much wider range (1→16) specifically because the symmetric version ran out of room. Same 3 tuning folds, same discipline.
+
+**Stage 1 — `gamma_hi`** (`gamma_lo` held at 0.5):
+
+| gamma_hi | PICP | Pinball | Width | Above P90 |
+|---:|---:|---:|---:|---:|
+| 1.0 | 58.3% | 0.0852 | 0.404 | 33.0% |
+| 2.0 | 59.4% | 0.0838 | 0.400 | 31.4% |
+| 4.0 | 60.6% | 0.0823 | 0.398 | 29.6% |
+| 8.0 | 61.5% | 0.0814 | 0.396 | 28.2% |
+| 16.0 | 62.0% | 0.0805 | 0.394 | 27.1% |
+
+**Still did not converge** at gamma_hi=16 (a ~49x widening factor at the calendar edge) — pinball loss kept improving to the edge of an already-wide range. Not a shape problem this time (that was already fixed); this is evidence that widening the interval **at all**, however parameterized, can't close a gap caused by a biased median.
+
+**Stage 2 — `gamma_lo`** (`gamma_hi` fixed at 16.0) — genuinely converged:
+
+| gamma_lo | PICP | Pinball | Width | Below P10 |
+|---:|---:|---:|---:|---:|
+| 0.0 | 55.4% | 0.0843 | 0.291 | 17.6% |
+| **0.5** | **62.0%** | **0.0805** | 0.394 | 10.9% |
+| 1.0 | 65.3% | 0.0805 | 0.479 | 7.7% |
+| 2.0 | 69.3% | 0.0807 | 0.552 | 3.6% |
+
+gamma_lo=0.5 is a real interior minimum (pinball rises again at 2.0) — confirms the low side was never the actual problem. Recommendation: `"NOT SHIPPING: at least one side did not converge to an interior optimum"` (script's own output). Shipped model keeps `extrapolation_gamma_lo = extrapolation_gamma_hi = 1.0` (the original symmetric default) — the asymmetric *mechanism* ships, the searched values don't.
+
 ## 7. Multi-horizon architecture comparison
 
 `evaluation/architecture_comparison.py`. Backbone only (no shrink/quantize/damp) on both sides, isolating the decomposition question. Same nested-CV tuning folds as table 6.

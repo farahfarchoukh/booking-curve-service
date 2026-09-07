@@ -157,6 +157,8 @@ class BookingCurveModel:
         level_q_shift: dict[float, float] | None = None,
         train_doy_range: tuple[int, int] = (1, 366),
         extrapolation_gamma: float = 0.0,
+        extrapolation_gamma_lo: float | None = None,
+        extrapolation_gamma_hi: float | None = None,
         meta: dict | None = None,
     ):
         self.level_booster = level_booster
@@ -179,9 +181,32 @@ class BookingCurveModel:
         self.level_q_shift = level_q_shift or {0.1: 0.0, 0.5: 0.0, 0.9: 0.0}
         self.train_doy_range = tuple(train_doy_range)
         self.extrapolation_gamma = extrapolation_gamma
+        # Asymmetric widening: the P90 side and the P10 side get their own
+        # gamma, because the actual miscalibration is one-sided (actuals
+        # miss high far more than low — DESIGN.md §6.7/§6.8) while a single
+        # shared gamma widens both sides equally. A nested-CV search over
+        # one shared gamma (evaluation/calibration_tuning.py) never
+        # converged — pinball loss kept improving to the edge of the tested
+        # range — because a symmetric knob has to over-widen the low side
+        # just to stretch the high side far enough; see
+        # evaluation/asymmetric_calibration_tuning.py for the search that
+        # replaced it. Old artifacts (meta.json without these two keys)
+        # fall back to the single `extrapolation_gamma` on both sides,
+        # reproducing the exact old behavior.
+        self.extrapolation_gamma_lo = (
+            extrapolation_gamma if extrapolation_gamma_lo is None else extrapolation_gamma_lo
+        )
+        self.extrapolation_gamma_hi = (
+            extrapolation_gamma if extrapolation_gamma_hi is None else extrapolation_gamma_hi
+        )
         self.meta = meta or {}
 
-    def _extrapolation_widen(self, stay_dates) -> np.ndarray:
+    def _extrapolation_distance(self, stay_dates) -> np.ndarray:
+        doy = pd.to_datetime(stay_dates).dt.dayofyear.to_numpy()
+        lo, hi = self.train_doy_range
+        return np.maximum(0, np.maximum(doy - hi, lo - doy))
+
+    def _extrapolation_widen(self, stay_dates, gamma: float | None = None) -> np.ndarray:
         """Extra interval inflation for stay dates outside the calendar
         range actually observed in training (day-of-year distance past the
         nearest training edge). This is a feature-space novelty signal, not
@@ -190,11 +215,16 @@ class BookingCurveModel:
         for genuine out-of-season extrapolation (e.g. hotel_H's Jul-Sep
         "busy season" is entirely unseen in its Apr-Jun training data);
         it widens the interval but cannot fix a biased median by itself.
+
+        `gamma` lets a caller pick which side's gamma to widen by
+        (`extrapolation_gamma_lo`/`_hi`); defaults to the legacy single
+        `extrapolation_gamma` for callers (and old meta.json loads) that
+        don't distinguish sides.
         """
-        doy = pd.to_datetime(stay_dates).dt.dayofyear.to_numpy()
-        lo, hi = self.train_doy_range
-        dist = np.maximum(0, np.maximum(doy - hi, lo - doy))
-        return 1.0 + self.extrapolation_gamma * (dist / 30.0)
+        if gamma is None:
+            gamma = self.extrapolation_gamma
+        dist = self._extrapolation_distance(stay_dates)
+        return 1.0 + gamma * (dist / 30.0)
 
     def _extrapolation_correction_damp(self, stay_dates) -> np.ndarray:
         """How much to trust the OOF-fit per-hotel/room-type CORRECTION
@@ -220,8 +250,16 @@ class BookingCurveModel:
         "we don't know this regime," trust in the correction shrinks by
         1/W for the same reason. At dist=0 (in-season) this is exactly
         1.0 — in-season behavior is completely unchanged by this fix.
+
+        Uses `extrapolation_gamma_hi` specifically (not an average of the
+        two sides, and not a third independent constant): the hi-side
+        gamma is the one actually carrying evidence about extrapolation
+        risk (§6.7's finding is that actuals miss *high*), so it's the
+        more informed choice for "how much do we trust this regime," and
+        reusing it avoids growing the search space with a third tunable
+        that nothing in the data has separately justified.
         """
-        return 1.0 / self._extrapolation_widen(stay_dates)
+        return 1.0 / self._extrapolation_widen(stay_dates, gamma=self.extrapolation_gamma_hi)
 
     # ---- feature prep -----------------------------------------------
     def _fix_categories(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -324,9 +362,12 @@ class BookingCurveModel:
         y_final = float(np.clip(raw_level[0] + corr, 0.0, 1.0))
 
         n = self.hotel_n_obs.get(hotel_id, 0)
-        widen = (1.0 + self.interval_widen_k / np.sqrt(n + 1)) * float(
-            self._extrapolation_widen(pd.Series([stay_date]))[0]
-        )
+        n_widen = 1.0 + self.interval_widen_k / np.sqrt(n + 1)
+        # Asymmetric: the P10-side gap and the P90-side gap each widen by
+        # their own gamma (see extrapolation_gamma_lo/_hi in __init__) —
+        # not the same factor stretched over both sides.
+        widen_lo = n_widen * float(self._extrapolation_widen(pd.Series([stay_date]), gamma=self.extrapolation_gamma_lo)[0])
+        widen_hi = n_widen * float(self._extrapolation_widen(pd.Series([stay_date]), gamma=self.extrapolation_gamma_hi)[0])
         # conformal shift first (fixes marginal coverage bias of the raw
         # pinball-loss booster), then per-hotel recentering, then widen for
         # hotels we have little of our own data on / dates outside the
@@ -334,8 +375,8 @@ class BookingCurveModel:
         med = float(np.clip(raw_quantiles[0.5][0] + self.level_q_shift.get(0.5, 0.0) + corr, 0.0, 1.0))
         lo = float(np.clip(raw_quantiles[0.1][0] + self.level_q_shift.get(0.1, 0.0) + corr, 0.0, 1.0))
         hi = float(np.clip(raw_quantiles[0.9][0] + self.level_q_shift.get(0.9, 0.0) + corr, 0.0, 1.0))
-        lo = float(np.clip(med - (med - lo) * widen, 0.0, 1.0))
-        hi = float(np.clip(med + (hi - med) * widen, 0.0, 1.0))
+        lo = float(np.clip(med - (med - lo) * widen_lo, 0.0, 1.0))
+        hi = float(np.clip(med + (hi - med) * widen_hi, 0.0, 1.0))
         lo, hi = min(lo, hi), max(lo, hi)
         return y_final, {"p10": lo, "p50": med, "p90": hi}
 
@@ -451,14 +492,14 @@ class BookingCurveModel:
         y_final = np.clip(level_raw + level_corr, 0.0, 1.0)
 
         n_obs = np.array([self.hotel_n_obs.get(h, 0) for h in hotel_ids])
-        widen = (1.0 + self.interval_widen_k / np.sqrt(n_obs + 1)) * self._extrapolation_widen(
-            keys["stay_date"]
-        )
+        n_widen = 1.0 + self.interval_widen_k / np.sqrt(n_obs + 1)
+        widen_lo = n_widen * self._extrapolation_widen(keys["stay_date"], gamma=self.extrapolation_gamma_lo)
+        widen_hi = n_widen * self._extrapolation_widen(keys["stay_date"], gamma=self.extrapolation_gamma_hi)
         med = np.clip(q_raw[0.5] + self.level_q_shift.get(0.5, 0.0) + level_corr, 0.0, 1.0)
         lo = np.clip(q_raw[0.1] + self.level_q_shift.get(0.1, 0.0) + level_corr, 0.0, 1.0)
         hi = np.clip(q_raw[0.9] + self.level_q_shift.get(0.9, 0.0) + level_corr, 0.0, 1.0)
-        lo = np.clip(med - (med - lo) * widen, 0.0, 1.0)
-        hi = np.clip(med + (hi - med) * widen, 0.0, 1.0)
+        lo = np.clip(med - (med - lo) * widen_lo, 0.0, 1.0)
+        hi = np.clip(med + (hi - med) * widen_hi, 0.0, 1.0)
         lo, hi = np.minimum(lo, hi), np.maximum(lo, hi)
 
         # shape: repeat each key once per non-zero checkpoint
@@ -543,6 +584,8 @@ class BookingCurveModel:
             "level_q_shift": self.level_q_shift,
             "train_doy_range": list(self.train_doy_range),
             "extrapolation_gamma": self.extrapolation_gamma,
+            "extrapolation_gamma_lo": self.extrapolation_gamma_lo,
+            "extrapolation_gamma_hi": self.extrapolation_gamma_hi,
             "quantiles": list(self.level_q_boosters.keys()),
             "extra": self.meta,
         }
@@ -579,5 +622,7 @@ class BookingCurveModel:
             level_q_shift={float(k): v for k, v in meta.get("level_q_shift", {}).items()},
             train_doy_range=tuple(meta.get("train_doy_range", (1, 366))),
             extrapolation_gamma=meta.get("extrapolation_gamma", 0.0),
+            extrapolation_gamma_lo=meta.get("extrapolation_gamma_lo"),
+            extrapolation_gamma_hi=meta.get("extrapolation_gamma_hi"),
             meta=meta.get("extra", {}),
         )

@@ -28,6 +28,7 @@ from datetime import date
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel
@@ -110,6 +111,26 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Ampliphi Booking Curve Service", version="0.1.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Fails closed by default: this is a backend-to-backend service (the
+# pricer/RM system calls it, not an end-user's browser), so the safe
+# default is no cross-origin access at all rather than a wildcard "*"
+# that would let any page on the internet call it using a signed-in
+# operator's cookies/session. Set BOOKING_CURVE_CORS_ORIGINS to a
+# comma-separated allowlist (e.g. the RM dashboard's own origin) only if
+# a browser-based caller genuinely needs it — read once at import time,
+# same as everything else that's actually infrastructure config rather
+# than per-request state (contrast with require_api_key below, which
+# re-reads its env var every call specifically to stay testable/reloadable).
+_cors_origins = [o.strip() for o in os.environ.get("BOOKING_CURVE_CORS_ORIGINS", "").split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["GET"],  # every route here is a read; never widen this without a reason
+        allow_headers=["X-API-Key"],
+        max_age=600,
+    )
 
 
 @app.middleware("http")

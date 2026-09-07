@@ -201,6 +201,8 @@ def run_training(
     val_start: str | None = None,
     extrapolation_gamma: float | None = None,
     interval_widen_k: float | None = None,
+    extrapolation_gamma_lo: float | None = None,
+    extrapolation_gamma_hi: float | None = None,
 ) -> Path:
     """Runs the full pipeline and saves a versioned artifact under
     `model_base_dir/<version>/`. Returns that directory.
@@ -228,6 +230,14 @@ def run_training(
     evaluation/calibration_tuning.py uses to search for values that
     actually hit target interval coverage on held-out rolling folds,
     instead of shipping an unvalidated order-of-magnitude guess forever.
+
+    `extrapolation_gamma_lo`/`_hi` override the per-side widening gammas
+    (model.py's asymmetric widening — see its own docstring for why a
+    single shared gamma never converged) — the hook
+    evaluation/asymmetric_calibration_tuning.py uses. Left `None`, both
+    default to whatever `extrapolation_gamma` resolves to, so an
+    ordinary training run (no side-specific override) behaves exactly
+    like the old single-gamma version.
     """
     version = new_version(version)
     out_dir = model_base_dir / version
@@ -236,6 +246,8 @@ def run_training(
     val_start = val_start or (pd.Timestamp(train_end) - pd.Timedelta(days=21)).strftime("%Y-%m-%d")
     extrapolation_gamma = EXTRAPOLATION_GAMMA if extrapolation_gamma is None else extrapolation_gamma
     interval_widen_k = INTERVAL_WIDEN_K if interval_widen_k is None else interval_widen_k
+    extrapolation_gamma_lo = extrapolation_gamma if extrapolation_gamma_lo is None else extrapolation_gamma_lo
+    extrapolation_gamma_hi = extrapolation_gamma if extrapolation_gamma_hi is None else extrapolation_gamma_hi
 
     level_lgb_params = dict(LEVEL_LGB_PARAMS, seed=seed)
     shape_lgb_params_base = dict(SHAPE_LGB_PARAMS, seed=seed)
@@ -506,6 +518,8 @@ def run_training(
         level_q_shift=level_q_shift,
         train_doy_range=(int(level_df.stay_date.dt.dayofyear.min()), int(level_df.stay_date.dt.dayofyear.max())),
         extrapolation_gamma=extrapolation_gamma,
+        extrapolation_gamma_lo=extrapolation_gamma_lo,
+        extrapolation_gamma_hi=extrapolation_gamma_hi,
         meta={
             "level_rounds": level_rounds,
             "shape_rounds": shape_rounds,
@@ -516,6 +530,8 @@ def run_training(
             "seed": seed,
             "extrapolation_gamma": extrapolation_gamma,
             "interval_widen_k": interval_widen_k,
+            "extrapolation_gamma_lo": extrapolation_gamma_lo,
+            "extrapolation_gamma_hi": extrapolation_gamma_hi,
         },
     )
     model.save(out_dir)

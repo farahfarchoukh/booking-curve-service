@@ -58,6 +58,14 @@ def test_healthz_always_ok_even_without_a_model(client_without_model):
     assert r.json() == {"status": "ok"}
 
 
+def test_cors_disabled_by_default(client_without_model):
+    # BOOKING_CURVE_CORS_ORIGINS is unset in every test fixture — this
+    # locks in the fail-closed default: a cross-origin request gets no
+    # Access-Control-Allow-Origin header, so a browser would block it.
+    r = client_without_model.get("/healthz", headers={"Origin": "https://evil.example.com"})
+    assert "access-control-allow-origin" not in {k.lower() for k in r.headers.keys()}
+
+
 def test_readyz_503_without_a_model(client_without_model):
     r = client_without_model.get("/readyz")
     assert r.status_code == 503
