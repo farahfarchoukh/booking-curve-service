@@ -38,6 +38,7 @@ from slowapi.util import get_remote_address
 from .logging_config import get_logger
 from .model import BookingCurveModel
 from .predict import _context, _default_paths, predict_booking_curve
+from .pricing import recommend_price
 from .registry import resolve_model_dir
 
 log = get_logger(__name__)
@@ -153,6 +154,16 @@ class BookingCurveResponse(BaseModel):
     diagnostics: dict
 
 
+class PriceRecommendationResponse(BaseModel):
+    recommended_price: float
+    base_rate: float
+    adjustment_pct: float
+    pace_ratio: float | None
+    confidence: float | None
+    reason: str
+    diagnostics: dict
+
+
 @app.get("/healthz")
 def healthz():
     """Liveness: process is up. Always 200 once the process can respond."""
@@ -210,6 +221,40 @@ def get_booking_curve(
         # don't leak internals to the client.
         log.exception(f"Unhandled error predicting {hotel_id}/{room_type_code}/{stay_date}")
         raise HTTPException(status_code=500, detail="Internal error generating prediction")
+
+
+@v1.get(
+    "/price-recommendation", response_model=PriceRecommendationResponse, dependencies=[Depends(require_api_key)]
+)
+@limiter.limit(RATE_LIMIT)
+def get_price_recommendation(
+    request: Request,  # required positionally by slowapi's decorator, unused otherwise
+    hotel_id: str,
+    room_type_code: str,
+    stay_date: date,
+    as_of_date: date,
+    base_rate: float,
+):
+    """Pace-based yield adjustment — see src/pricing.py's module docstring
+    for exactly what this is (and, importantly, isn't: no learned price
+    elasticity, see DESIGN.md SS6.10/SS6.12). Unlike /booking-curve,
+    as_of_date is required here: without a live pickup signal there's
+    nothing for this endpoint to react to, by design, not by omission."""
+    if state.model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    try:
+        return recommend_price(
+            hotel_id,
+            room_type_code,
+            stay_date.isoformat(),
+            as_of_date.isoformat(),
+            base_rate,
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        log.exception(f"Unhandled error pricing {hotel_id}/{room_type_code}/{stay_date}")
+        raise HTTPException(status_code=500, detail="Internal error generating price recommendation")
 
 
 app.include_router(v1)

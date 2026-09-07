@@ -76,6 +76,11 @@ python evaluation/ablation_study.py                # does each correction layer 
 python evaluation/seed_sensitivity.py              # retrains at 5 seeds — is the story seed-dependent? (~3 min)
 python evaluation/rolling_backtest.py              # 4-fold walk-forward backtest (~3 min)
 python evaluation/price_demand_eda.py              # what price signal (if any) exists in this data? (DESIGN.md §6.10)
+python evaluation/calibration_tuning.py            # nested-CV search for interval-widening constants (~10 min; DESIGN.md §6.11)
+python evaluation/feature_importance.py            # what the level/shape boosters actually split on
+python evaluation/pricing_demo.py                  # price-recommendation walkthrough on real hotel_C/H scenarios (DESIGN.md §6.12)
+python -m src.pricing --hotel-id hotel_C --room-type-code <code> \
+    --stay-date 2025-08-15 --as-of-date 2025-08-01 --base-rate 220   # single price lookup
 ```
 
 Run everything from the repo root (module form `python -m src.train`, not `python src/train.py`, since the package uses relative imports).
@@ -116,6 +121,7 @@ On Windows with Git Bash specifically: prefix `docker run` with `MSYS_NO_PATHCON
 - **Shared feature code** (`src/features.py`) used identically by training and inference — the actual mechanism against train/serve skew, not a claim.
 - **A data-quality fix I found, not one I was told about**: `reservations.csv` references 4 `room_type_code`s (655 + 536 reservations on hotel_C alone — not a rounding error) that don't exist in `room_types.csv`. Without patching this, ~24% of the real test-window curves are silently dropped from evaluation. `src/data.py::_repair_missing_room_types` detects and patches this (inferring inventory from peak concurrent bookings) and logs it loudly rather than failing silently.
 - **`evaluation/compare_production.py`**: an honest three-way comparison (ours / baseline / Ampliphi's own production curve) that plain `evaluate.py` doesn't give you out of the box.
+- **`src/pricing.py` + `/v1/price-recommendation`**: a pace-based price recommendation layer on top of the forecast — reacts to booking pace vs. the model's own expectation, gated by the model's own calibrated uncertainty, bounded by an empirical reference range, and deliberately *not* a learned price-elasticity model (`DESIGN.md` §6.12 explains why that specifically isn't attempted). `evaluation/pricing_demo.py` walks through real hotel_C/hotel_H scenarios.
 
 ## Engineering hardening
 
@@ -147,22 +153,30 @@ Two rounds so far, each triggered by asking "what's still missing?" and then act
 
 **Round 3 — the modeling-judgment gaps a "what's still missing?" pass doesn't surface, because they're not engineering checklist items:**
 
-Full detail in `DESIGN.md` §6.8–§6.11; the headline is that this round found a real bug the earlier rounds couldn't have, because it required a technique (ablation) none of the earlier passes used. Summary:
+Full detail in `DESIGN.md` §6.8–§6.10 (§6.11–§6.13 cover the follow-up round below); the headline is that this round found a real bug the earlier rounds couldn't have, because it required a technique (ablation) none of the earlier passes used. Summary:
 
 - **Hierarchical (hotel → room_type) pooling**, gated by a curve-count floor chosen from this dataset's own structure, not tuned against test MAE (§6.8).
 - **Inventory quantization**: occupancy is discrete (`booked/inventory_count`), not continuous, for the 44% of hotel_C's room-type-nights with inventory ≤ 2 — the single biggest lever in this round, −6.4% weighted MAE on its own (§6.8).
 - **A real bug found by ablation, not assumed away**: the honestly-cross-validated per-hotel correction was, on its own, making test performance *worse* than no correction at all — because this dataset's entire train window sits before its entire test window, so every test prediction was silently "extrapolation." Fixed by damping the correction (not just widening the interval) the same way `_extrapolation_widen` already damps for exactly this case (§6.8). This also fixed most of the interval-coverage gap in `evaluation/interval_metrics.py` (39.3% → 62.4% PICP) as a side effect of fixing the point estimate, not a separate tuning pass.
 - **Statistical rigor on the "beats baseline" claim**: a cluster bootstrap (not a naive one — see §6.9 for why), a 5-seed sensitivity check, and a 4-fold walk-forward backtest, all checked into `evaluation/` and reproducible, not asserted.
 - **A price-demand EDA that didn't exist before**, appropriate to a Pricing Intelligence role — and an honest negative result: hotel_H has no price data anywhere in this dataset, and hotel_C's price-occupancy correlation is too weak and too confounded by demand-responsive pricing to support an elasticity claim (§6.10).
-- **An explicit GO/NO-GO recommendation** (§6.11) — qualified GO on the point forecast for human-reviewed pricing, NO-GO on automating yield off the interval or using price as a feature, with the specific bar for revisiting each.
+- **An explicit GO/NO-GO recommendation** (§6.13) — qualified GO on the point forecast for human-reviewed pricing, NO-GO on automating yield off the interval or using price as a feature, with the specific bar for revisiting each.
+
+**Round 4 — from "predict occupancy" to an actual price, since a Pricing Intelligence role needs one, plus closing two loose ends Round 3 left open:**
+
+- **A validated (not just guessed) search over the interval-widening constants** (`evaluation/calibration_tuning.py`, §6.11) — nested cross-validation on rolling folds that exclude the official test split, so this doesn't repeat Round 3's own leakage lesson one level down. The honest result: the search never converged — pinball loss kept improving to the edge of the tested range, revealing that the widening mechanism is symmetric while the actual miscalibration is one-sided. I didn't ship an unvalidated "biggest number I tried"; I shipped the diagnosis and left the real fix (asymmetric widening) as the scoped next step.
+- **`src/pricing.py` + `/v1/price-recommendation`**: a pace-based yield-adjustment layer (§6.12) — deliberately *not* a learned elasticity model, because §6.10 already found this data can't support one. Reuses the forecast's own `as_of_date` pace signal and its own calibrated uncertainty for confidence-gating, bounded by an empirical (not fit) reference range from Ampliphi's historical adjustments.
+- **Feature importance, checked in** (`evaluation/feature_importance.py`) — closes a gap where DESIGN.md §6.1 had been asserting which features get zero split gain without ever having actually run the numbers. It turned out to be wrong about one of them (`primary_rate_mode`, not zero-gain; `total_rooms` was the missing one) — caught only because this script now exists.
 
 **What's still genuinely missing**, stated plainly rather than left implicit: no database (everything is local files — fine at this scale, not at "hundreds of hotels"), no message queue / scheduler / actual deployment anywhere, no auth beyond a placeholder API-key header check, no automated retraining schedule, no monitoring or drift detection actually wired up (DESIGN.md §6.5/§6.6 describe what I'd build; none of it runs), no secrets management, no multi-stage Docker build (checked whether one would help — it wouldn't: every heavy dependency here is a prebuilt wheel, nothing compiled to shed at a build stage). `/v1/booking-curve` versioning, Prometheus `/metrics`, and in-process rate limiting (`slowapi`) *are* implemented — see `src/api.py` — but rate limiting is per-process/in-memory (no shared store across replicas) and there's no CORS policy configured. `scripts/load_test.py` measured real p50≈2s/p95≈7-8s under 20 concurrent requests against the live per-row API path — likely ~13 sequential LightGBM calls per request vs. the batched path `predictions.json` actually uses — diagnosed, not yet fixed. The registry and hardened API are real, working mechanics; they are not a production deployment.
 
 ## What I'd build next
 
 - A real `season_calendar` feature and cross-hotel-family conformal calibration — the two structural fixes for the hotel_H gap that extrapolation-correction damping (§6.8) only partially closes (see `DESIGN.md` §6.2/§6.7/§6.8).
+- **Asymmetric interval widening.** `evaluation/calibration_tuning.py` (§6.11) found the current symmetric widen factor is structurally the wrong shape for a one-sided miscalibration (actuals miss high far more than low) — the search kept improving all the way to the edge of the tested range instead of converging, which is itself the finding. Separately calibrating the P10-side and P90-side widening is the concrete next step, not a bigger shared constant.
 - Model-based (not just peak-concurrent-inferred) inventory reconciliation for the 4 orphaned room types, ideally by escalating the dimension-table gap upstream instead of silently patching it.
-- Genuine price experimentation data (or an instrument) — §6.10 found the existing `suggested_prices` history can't support a real elasticity estimate (too small, and confounded by the pricer's own demand-responsiveness); the switchback in §6.6 would start generating exactly that data if it were live.
+- Genuine price experimentation data (or an instrument) — §6.10 found the existing `suggested_prices` history can't support a real elasticity estimate (too small, and confounded by the pricer's own demand-responsiveness); the switchback in §6.6 would start generating exactly that data if it were live, and would let `src/pricing.py` (§6.12) eventually replace its pace-based rule with a learned response curve instead of a bounded heuristic.
+- More historical seasons for hotel_C/H. `evaluation/pricing_demo.py` shows confidence collapses to ~0.01–0.14 on literally every real stay available to demo against, because every one of them is out-of-season relative to the training window — that's a data-coverage ceiling no amount of additional modeling clears; only more calendar history does.
 - Real cloud auth, a database, and monitoring in place of the current placeholders (see "What's still genuinely missing" above); a shared (not in-process) rate-limit store once this runs on more than one replica.
 
 ## Data

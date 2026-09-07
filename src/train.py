@@ -199,6 +199,8 @@ def run_training(
     seed: int = SEED,
     train_end: str | None = None,
     val_start: str | None = None,
+    extrapolation_gamma: float | None = None,
+    interval_widen_k: float | None = None,
 ) -> Path:
     """Runs the full pipeline and saves a versioned artifact under
     `model_base_dir/<version>/`. Returns that directory.
@@ -220,12 +222,20 @@ def run_training(
     fixed calendar date, so it stays "the last ~3 weeks of the train
     window" at every cutoff instead of silently drifting outside the
     training window (or swallowing the whole thing) as train_end moves.
+
+    `extrapolation_gamma`/`interval_widen_k` override the module defaults
+    (see EXTRAPOLATION_GAMMA/INTERVAL_WIDEN_K above) — the hook
+    evaluation/calibration_tuning.py uses to search for values that
+    actually hit target interval coverage on held-out rolling folds,
+    instead of shipping an unvalidated order-of-magnitude guess forever.
     """
     version = new_version(version)
     out_dir = model_base_dir / version
 
     train_end = train_end or TRAIN_END
     val_start = val_start or (pd.Timestamp(train_end) - pd.Timedelta(days=21)).strftime("%Y-%m-%d")
+    extrapolation_gamma = EXTRAPOLATION_GAMMA if extrapolation_gamma is None else extrapolation_gamma
+    interval_widen_k = INTERVAL_WIDEN_K if interval_widen_k is None else interval_widen_k
 
     level_lgb_params = dict(LEVEL_LGB_PARAMS, seed=seed)
     shape_lgb_params_base = dict(SHAPE_LGB_PARAMS, seed=seed)
@@ -487,7 +497,7 @@ def run_training(
         level_shrink_k=LEVEL_SHRINK_K,
         shape_shrink_k=SHAPE_SHRINK_K,
         hotel_n_obs=hotel_n_obs,
-        interval_widen_k=INTERVAL_WIDEN_K,
+        interval_widen_k=interval_widen_k,
         room_level_shrink=room_level_shrink,
         room_shape_shrink=room_shape_shrink,
         room_level_shrink_k=ROOM_LEVEL_SHRINK_K,
@@ -495,7 +505,7 @@ def run_training(
         room_n_obs=room_n_obs,
         level_q_shift=level_q_shift,
         train_doy_range=(int(level_df.stay_date.dt.dayofyear.min()), int(level_df.stay_date.dt.dayofyear.max())),
-        extrapolation_gamma=EXTRAPOLATION_GAMMA,
+        extrapolation_gamma=extrapolation_gamma,
         meta={
             "level_rounds": level_rounds,
             "shape_rounds": shape_rounds,
@@ -504,6 +514,8 @@ def run_training(
             "n_level_rows": len(level_df),
             "n_shape_rows": len(shape_df),
             "seed": seed,
+            "extrapolation_gamma": extrapolation_gamma,
+            "interval_widen_k": interval_widen_k,
         },
     )
     model.save(out_dir)
