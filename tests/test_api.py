@@ -120,6 +120,56 @@ def test_booking_curve_invalid_date_is_422(client_with_model):
     assert r.status_code == 422
 
 
+def test_price_recommendation_503_without_a_model(client_without_model):
+    r = client_without_model.get(
+        "/v1/price-recommendation",
+        params={
+            "hotel_id": "hotel_X", "room_type_code": "rt_x1",
+            "stay_date": "2025-06-30", "as_of_date": "2025-06-10", "base_rate": 200,
+        },
+    )
+    assert r.status_code == 503
+
+
+def test_price_recommendation_happy_path(client_with_model):
+    # Same real anchored scenario used in tests/test_pricing.py — a
+    # genuine (synthetic) pace signal, not a blind hold.
+    r = client_with_model.get(
+        "/v1/price-recommendation",
+        params={
+            "hotel_id": "hotel_X", "room_type_code": "rt_x1",
+            "stay_date": "2025-06-30", "as_of_date": "2025-06-10", "base_rate": 200,
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["base_rate"] == 200
+    assert body["pace_ratio"] is not None
+    assert 0.0 <= body["confidence"] <= 1.0
+    assert body["recommended_price"] > 0
+
+
+def test_price_recommendation_without_as_of_date_is_422(client_with_model):
+    # as_of_date is required for pricing (no live signal, nothing to
+    # react to) — unlike /booking-curve, where it's optional.
+    r = client_with_model.get(
+        "/v1/price-recommendation",
+        params={"hotel_id": "hotel_X", "room_type_code": "rt_x1", "stay_date": "2025-06-30", "base_rate": 200},
+    )
+    assert r.status_code == 422
+
+
+def test_price_recommendation_invalid_base_rate_is_400(client_with_model):
+    r = client_with_model.get(
+        "/v1/price-recommendation",
+        params={
+            "hotel_id": "hotel_X", "room_type_code": "rt_x1",
+            "stay_date": "2025-06-30", "as_of_date": "2025-06-10", "base_rate": -10,
+        },
+    )
+    assert r.status_code == 400
+
+
 def test_value_error_from_prediction_becomes_400(client_with_model, monkeypatch):
     # FastAPI's own `date` type validation means a malformed date never
     # reaches predict_booking_curve — so the 400 branch is otherwise

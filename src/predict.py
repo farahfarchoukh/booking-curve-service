@@ -172,6 +172,11 @@ def predict_booking_curve(
                     "dus_now": dus_now,
                     "anchor_frac": anchor_frac,
                     "model_final_hat": model_final,
+                    # blind model's own expectation at this exact lead time —
+                    # already computed above for the rescaling, exposed here
+                    # because it's also the reference `src/pricing.py` needs
+                    # for a pace-deviation signal (anchor_frac vs. this).
+                    "model_at_anchor": model_at_anchor,
                 }
 
     return {

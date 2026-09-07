@@ -1,0 +1,162 @@
+{
+  "model_version": "20260906T184935Z",
+  "level_importance": [
+    {
+      "feature": "doy_sin",
+      "gain_pct": 33.635276724605134,
+      "split_count": 421
+    },
+    {
+      "feature": "doy_cos",
+      "gain_pct": 18.564394839851843,
+      "split_count": 199
+    },
+    {
+      "feature": "room_share",
+      "gain_pct": 17.703869763691205,
+      "split_count": 83
+    },
+    {
+      "feature": "inventory_count",
+      "gain_pct": 13.76826798890553,
+      "split_count": 151
+    },
+    {
+      "feature": "dow",
+      "gain_pct": 8.90326396904634,
+      "split_count": 123
+    },
+    {
+      "feature": "room_type_kind",
+      "gain_pct": 3.4681803897616743,
+      "split_count": 36
+    },
+    {
+      "feature": "country",
+      "gain_pct": 2.228027634108908,
+      "split_count": 15
+    },
+    {
+      "feature": "week_of_year",
+      "gain_pct": 0.773130456269657,
+      "split_count": 12
+    },
+    {
+      "feature": "primary_rate_mode",
+      "gain_pct": 0.3370032904625595,
+      "split_count": 2
+    },
+    {
+      "feature": "currency",
+      "gain_pct": 0.3367151939598781,
+      "split_count": 2
+    },
+    {
+      "feature": "is_weekend",
+      "gain_pct": 0.281869749337269,
+      "split_count": 6
+    },
+    {
+      "feature": "pms_type",
+      "gain_pct": 0.0,
+      "split_count": 0
+    },
+    {
+      "feature": "region_type",
+      "gain_pct": 0.0,
+      "split_count": 0
+    },
+    {
+      "feature": "total_rooms",
+      "gain_pct": 0.0,
+      "split_count": 0
+    }
+  ],
+  "shape_importance": [
+    {
+      "feature": "cp",
+      "gain_pct": 63.73910728260935,
+      "split_count": 278
+    },
+    {
+      "feature": "doy_sin",
+      "gain_pct": 17.436511516574228,
+      "split_count": 570
+    },
+    {
+      "feature": "country",
+      "gain_pct": 6.178186568178357,
+      "split_count": 66
+    },
+    {
+      "feature": "doy_cos",
+      "gain_pct": 4.897151345191977,
+      "split_count": 154
+    },
+    {
+      "feature": "inventory_count",
+      "gain_pct": 3.519724260519693,
+      "split_count": 260
+    },
+    {
+      "feature": "week_of_year",
+      "gain_pct": 1.2308020791746632,
+      "split_count": 35
+    },
+    {
+      "feature": "currency",
+      "gain_pct": 1.1642817331350304,
+      "split_count": 21
+    },
+    {
+      "feature": "dow",
+      "gain_pct": 1.05534686700324,
+      "split_count": 127
+    },
+    {
+      "feature": "room_share",
+      "gain_pct": 0.2996979763218458,
+      "split_count": 42
+    },
+    {
+      "feature": "room_type_kind",
+      "gain_pct": 0.2259260995856596,
+      "split_count": 27
+    },
+    {
+      "feature": "primary_rate_mode",
+      "gain_pct": 0.17295061172692947,
+      "split_count": 5
+    },
+    {
+      "feature": "is_weekend",
+      "gain_pct": 0.08031365997902662,
+      "split_count": 5
+    },
+    {
+      "feature": "pms_type",
+      "gain_pct": 0.0,
+      "split_count": 0
+    },
+    {
+      "feature": "region_type",
+      "gain_pct": 0.0,
+      "split_count": 0
+    },
+    {
+      "feature": "total_rooms",
+      "gain_pct": 0.0,
+      "split_count": 0
+    }
+  ],
+  "zero_gain_level": [
+    "pms_type",
+    "region_type",
+    "total_rooms"
+  ],
+  "zero_gain_shape": [
+    "pms_type",
+    "region_type",
+    "total_rooms"
+  ]
+}

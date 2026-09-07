@@ -154,6 +154,8 @@
       <a href="#architecture">Architecture</a>
       <a href="#results">Results</a>
       <a href="#coldstart">Cold start</a>
+      <a href="#rigor">Rigor</a>
+      <a href="#pricing">Pricing</a>
       <a href="#next">What's next</a>
     </div>
   </div>
@@ -167,10 +169,10 @@
     <p class="byline">Farah Farchoukh · predict_booking_curve(hotel_id, room_type_code, stay_date, as_of_date)</p>
 
     <div class="stats">
-      <div class="stat pos"><div class="n">−12<small>%</small></div><div class="l">WEIGHTED MAE VS. HEURISTIC BASELINE</div></div>
-      <div class="stat pos"><div class="n">0.19<small> MAE</small></div><div class="l">BEATS THE PRODUCTION CURVE'S 0.28†</div></div>
+      <div class="stat pos"><div class="n">−23<small>%</small></div><div class="l">WEIGHTED MAE VS. HEURISTIC BASELINE</div></div>
+      <div class="stat pos"><div class="n">0.16<small> MAE</small></div><div class="l">BEATS THE PRODUCTION CURVE'S 0.26†</div></div>
       <div class="stat"><div class="n">0<small>%</small></div><div class="l">MONOTONICITY / BOUND VIOLATIONS</div></div>
-      <div class="stat"><div class="n">2<small> of 8</small></div><div class="l">HOTELS WITH ANY RESERVATION HISTORY</div></div>
+      <div class="stat"><div class="n">p&lt;.001<small></small></div><div class="l">CLUSTER-BOOTSTRAP: BEATS BASELINE, NOT NOISE</div></div>
     </div>
     <p class="byline">† hotel_C's base room type only — the sole room `expected_booking_curves.csv` covers.</p>
   </div>
@@ -294,8 +296,8 @@
           <rect class="bar-base" x="88" y="30" width="184" height="26"/>
           <text class="val-label" x="280" y="48">0.348</text>
           <text class="axis-label" x="40" y="82">ours</text>
-          <rect class="bar-ours" x="88" y="70" width="162" height="26"/>
-          <text class="val-label" x="258" y="88">0.306</text>
+          <rect class="bar-ours" x="88" y="70" width="140" height="26"/>
+          <text class="val-label" x="236" y="88">0.265</text>
         </svg>
       </div>
       <div class="chart-card">
@@ -311,14 +313,14 @@
           <rect class="bar-prod" x="88" y="53" width="131" height="20"/>
           <text class="val-label" x="225" y="67">0.262</text>
           <text class="axis-label" x="40" y="100">ours</text>
-          <rect class="bar-ours" x="88" y="88" width="88" height="20"/>
-          <text class="val-label" x="182" y="102">0.177</text>
+          <rect class="bar-ours" x="88" y="88" width="82" height="20"/>
+          <text class="val-label" x="176" y="102">0.164</text>
         </svg>
       </div>
     </div>
 
     <h3>Per-checkpoint MAE — the honest divergence</h3>
-    <p>hotel_C behaves the way a booking-curve model should: error <em>falls</em> as the stay approaches and more is known. hotel_H runs backwards — because its Jul–Sep busy season never appears in its own Apr–Jun training data, the gap between an under-anchored forecast and real late-arriving demand <em>widens</em> the closer we get.</p>
+    <p>hotel_C behaves the way a booking-curve model should: error <em>falls</em> as the stay approaches and more is known. hotel_H still runs mostly backwards — its Jul–Sep busy season never appears in its own Apr–Jun training data, so error still <em>rises</em> as the stay approaches — but it no longer peaks right at day-1; see §05 for the fix that eased this (an unvalidated bias correction was making it worse, applied at full strength regardless of season).</p>
     <div class="chart-card" style="max-width:640px;">
       <svg viewBox="0 0 620 260" width="100%">
         <line class="axis" x1="50" y1="20" x2="50" y2="210"/>
@@ -332,13 +334,13 @@
         </g>
 
         <!-- x categories 90..0, evenly spaced x=70..590; y = 210 - (value/0.5)*190 -->
-        <polyline class="line-c" points="70,97.7 128,87.7 186,87.1 243,86.9 301,89.5 359,91.1 417,103.9 474,116.8 532,127.8 590,143.6"/>
-        <polyline class="line-h" points="70,167.0 128,149.5 186,135.2 243,104.3 301,83.4 359,60.1 417,42.8 474,36.0 532,26.2 590,43.0"/>
+        <polyline class="line-c" points="70,97.9 128,94.1 186,96.0 243,88.6 301,100.0 359,106.2 417,118.5 474,132.1 532,141.8 590,151.9"/>
+        <polyline class="line-h" points="70,167.0 128,149.3 186,136.5 243,105.4 301,91.5 359,80.0 417,65.3 474,73.1 532,74.5 590,79.6"/>
         <g class="dot-c">
-          <circle cx="70" cy="97.7" r="2.6"/><circle cx="128" cy="87.7" r="2.6"/><circle cx="186" cy="87.1" r="2.6"/><circle cx="243" cy="86.9" r="2.6"/><circle cx="301" cy="89.5" r="2.6"/><circle cx="359" cy="91.1" r="2.6"/><circle cx="417" cy="103.9" r="2.6"/><circle cx="474" cy="116.8" r="2.6"/><circle cx="532" cy="127.8" r="2.6"/><circle cx="590" cy="143.6" r="2.6"/>
+          <circle cx="70" cy="97.9" r="2.6"/><circle cx="128" cy="94.1" r="2.6"/><circle cx="186" cy="96.0" r="2.6"/><circle cx="243" cy="88.6" r="2.6"/><circle cx="301" cy="100.0" r="2.6"/><circle cx="359" cy="106.2" r="2.6"/><circle cx="417" cy="118.5" r="2.6"/><circle cx="474" cy="132.1" r="2.6"/><circle cx="532" cy="141.8" r="2.6"/><circle cx="590" cy="151.9" r="2.6"/>
         </g>
         <g class="dot-h">
-          <circle cx="70" cy="167.0" r="2.6"/><circle cx="128" cy="149.5" r="2.6"/><circle cx="186" cy="135.2" r="2.6"/><circle cx="243" cy="104.3" r="2.6"/><circle cx="301" cy="83.4" r="2.6"/><circle cx="359" cy="60.1" r="2.6"/><circle cx="417" cy="42.8" r="2.6"/><circle cx="474" cy="36.0" r="2.6"/><circle cx="532" cy="26.2" r="2.6"/><circle cx="590" cy="43.0" r="2.6"/>
+          <circle cx="70" cy="167.0" r="2.6"/><circle cx="128" cy="149.3" r="2.6"/><circle cx="186" cy="136.5" r="2.6"/><circle cx="243" cy="105.4" r="2.6"/><circle cx="301" cy="91.5" r="2.6"/><circle cx="359" cy="80.0" r="2.6"/><circle cx="417" cy="65.3" r="2.6"/><circle cx="474" cy="73.1" r="2.6"/><circle cx="532" cy="74.5" r="2.6"/><circle cx="590" cy="79.6" r="2.6"/>
         </g>
 
         <g class="axis-label">
@@ -356,8 +358,8 @@
         </g>
       </svg>
       <div class="legend">
-        <span><span class="sw" style="background:var(--teal)"></span>hotel_C (0.30 → 0.17)</span>
-        <span><span class="sw" style="background:var(--brass)"></span>hotel_H (0.11 → 0.44, peaking 0.48 at 1d)</span>
+        <span><span class="sw" style="background:var(--teal)"></span>hotel_C (0.30 → 0.15)</span>
+        <span><span class="sw" style="background:var(--brass)"></span>hotel_H (0.11 → 0.34, peaking 0.38 at 7d)</span>
       </div>
     </div>
   </div>
@@ -372,31 +374,61 @@
     <h3>P10 / P90 coverage, test window</h3>
     <div class="coverage">
       <div class="cov-bar">
-        <div class="cov-seg cov-below" style="flex:7"></div>
-        <div class="cov-seg cov-in" style="flex:39">39%</div>
-        <div class="cov-seg cov-above" style="flex:54">54%</div>
+        <div class="cov-seg cov-below" style="flex:3"></div>
+        <div class="cov-seg cov-in" style="flex:62">62%</div>
+        <div class="cov-seg cov-above" style="flex:34">34%</div>
       </div>
       <div class="legend" style="margin-top:10px;">
-        <span><span class="sw" style="background:var(--ink-soft)"></span>below p10 — 7%</span>
-        <span><span class="sw" style="background:var(--teal)"></span>within interval — 39%</span>
-        <span><span class="sw" style="background:var(--warn)"></span>above p90 — 54%</span>
+        <span><span class="sw" style="background:var(--ink-soft)"></span>below p10 — 3%</span>
+        <span><span class="sw" style="background:var(--teal)"></span>within interval — 62%</span>
+        <span><span class="sw" style="background:var(--warn)"></span>above p90 — 34%</span>
       </div>
-      <div class="cov-target">Target for an 80% interval: ~80% within, ~10% on each side. In-distribution (train-window, out-of-fold): 90%.</div>
+      <div class="cov-target">Target for an 80% interval: ~80% within, ~10% on each side. In-distribution (train-window, out-of-fold): 90%. This was 39% before §05's fix.</div>
     </div>
     <div class="callout">
-      <strong>Reported, not tuned away:</strong> conformal calibration gets in-distribution coverage to 90% — the machinery works. On the true Jul–Sep window it drops to 39%, one-sided, because the bias is in the <em>median</em> (under-anchored on an unseen season), and a symmetric interval can't fully correct a biased center. I widened intervals for out-of-season dates and it helped only marginally — confirming the diagnosis rather than fixing it. The real fix is structural: a seasonal-calendar feature, and conformal calibration pooled across same-<code>region_type</code> hotels once more exist.
+      <strong>Reported, not tuned away:</strong> conformal calibration gets in-distribution coverage to 90% — the machinery works. On the true Jul–Sep window it was 39%, one-sided, because the bias was in the <em>median</em> (under-anchored on an unseen season), not just the interval width. §05 covers the actual fix (damping the point-estimate correction itself, not just widening around it) — coverage is now 62%, still short of 80% and still one-sided, but a real, measured improvement, not a wider constant papering over the same bias.
     </div>
+  </div>
+</section>
+
+<section id="rigor">
+  <div class="wrap">
+    <div class="kicker"><span class="num">05</span></div>
+    <h2>An ablation found a real bug — a correction that was making things worse, not better.</h2>
+    <p>Two more modeling decisions first: a second, nested empirical-Bayes level pools within a hotel across its room types (gated by a curve-count floor, not tuned against test scores), and occupancy is explicitly quantized for the 44% of hotel_C's room-type-nights with inventory ≤2 — occupancy there is <code>booked/inventory</code>, not continuous, and treating it as continuous was the single biggest lever in this pass on its own.</p>
+    <p>Then I ran an ablation — the same trained boosters, correction layers toggled on and off — to check whether the per-hotel bias correction (§02) was actually earning its keep. It wasn't: <strong>backbone alone scored better than backbone + hotel correction</strong> on the test window. The honestly-cross-validated correction was net <em>negative</em> out of sample. Root cause: this dataset's entire training window (Mar–Jun) sits before its entire test window (Jul–Sep) — every test prediction is already "extrapolation," and while the interval was already widening for exactly that case, nothing was damping the point-estimate correction itself. A bias learned from hotel_H's spring ramp-up was being applied at full strength to its unseen summer peak.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Fix</th><th>Weighted MAE</th><th>Change</th></tr></thead>
+        <tbody>
+          <tr><td>Room-type pooling + quantization</td><td class="num">0.284</td><td class="num">from 0.306</td></tr>
+          <tr class="hl"><td>+ damping the correction by the same distance term already widening the interval</td><td class="num">0.265</td><td class="num">−13% total</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout good">
+      <strong>Validated, not assumed:</strong> the margin over baseline survives a cluster bootstrap at the (hotel, room_type) series level (95% CI [−0.116, −0.050], p≈0.0000 — not the naive per-checkpoint bootstrap, which would overstate confidence from correlated rows), 5 different training seeds (std 0.007, well inside that margin), and a 4-fold walk-forward backtest where hotel_H's error falls monotonically as its own training-season overlap grows — independent confirmation of the diagnosis above, not just a story that explains one number. I also empirically checked the core architecture choice itself: the level×shape decomposition beats the simplest alternative (one model, <code>cp</code> as a feature) by ~4.3% on a proper nested comparison, not just first-principles reasoning.
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="wrap">
+    <div class="kicker"><span class="num">06</span></div>
+    <h2>From forecast to price — without pretending to know something the data doesn't support.</h2>
+    <p>The natural next question for a Pricing Intelligence role: does this feed an actual price? I checked whether the data supports a learned price-elasticity model first — it doesn't. <code>suggested_prices.csv</code> is Ampliphi's own pricer's output, not an independent price experiment; regressing occupancy on price mostly re-learns "the pricer raises price because occupancy is already high" and calls the reverse causality a demand curve. One statistically significant correlation in this dataset (hotel_C's base room, ρ=0.53, p=0.008) is <em>positive</em> — exactly that signature, not a discovered elasticity.</p>
+    <p>So <code>src/pricing.py</code> builds what the data <em>does</em> support: a pace-deviation signal — actual booking pace vs. this model's own expectation at that lead time, reusing the <code>as_of_date</code> machinery already built — scaled by the model's own calibrated interval width for confidence, bounded by Ampliphi's own historical adjustment range. Running ahead of pace raises the recommendation; running behind discounts it; a hotel_H-shaped low-confidence forecast is mechanically prevented from moving the price much at all. It's a guardrail a revenue manager reviews, not an autonomous price-setter — and it says so.</p>
   </div>
 </section>
 
 <section id="next">
   <div class="wrap">
-    <div class="kicker"><span class="num">05</span></div>
+    <div class="kicker"><span class="num">07</span></div>
     <h2>What I'd build next, in order</h2>
     <ul class="tight">
       <li><strong>A <code>season_calendar</code> reference table</strong> (peak/shoulder/low by month, from RM ops or a comp-set history) — the single highest-leverage fix for the hotel_H-shaped cold-start gap, and the one piece of context this dataset deliberately withholds.</li>
-      <li><strong>Cross-hotel-family conformal calibration</strong> — pool residuals across hotels sharing a <code>region_type</code> once there are enough of them, so a resort-mountain property's intervals stop leaning on a resort-coastal hotel's calibration.</li>
-      <li><strong>An off-policy read on <code>suggested_prices</code></strong> as the historical action — the stretch goal I didn't get to, gated behind more validation-window data than this extract provides.</li>
+      <li><strong>Asymmetric interval widening.</strong> A nested-CV search for better widening constants never converged — pinball loss kept improving to the edge of the tested range, revealing the mechanism is symmetric while the actual miscalibration is one-sided. Separately calibrating each side is the real next step, not a bigger shared constant.</li>
+      <li><strong>Genuine price-experimentation data</strong> — §06 found <code>suggested_prices</code> can't support a real elasticity estimate on its own (too small, confounded by the pricer's own demand-responsiveness); a live switchback would start generating exactly that data.</li>
       <li><strong>Switchback A/B against <code>expected_booking_curves</code></strong> in production, hotel as a random effect — laid out in full in <code>DESIGN.md</code> §6.6.</li>
     </ul>
   </div>
