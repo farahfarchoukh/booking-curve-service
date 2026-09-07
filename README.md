@@ -32,6 +32,8 @@ flowchart LR
 
 `EXPERIMENTS.md` — every experiment this project ran (seed sensitivity, walk-forward backtest, ablation, architecture comparison, calibration search, latency before/after), each traceable to a checked-in script and JSON file, plus the actual model-selection logic tying them together — not just the headline number.
 
+`INTERVIEW_PREP.md` — short, specific answers (ML / statistics / MLOps / system design / pricing intelligence) to the questions this design invites, each grounded in an actual file or number in this repo rather than the generic version of the answer.
+
 ## Results
 
 Test window: 2025-07-01 → 2025-09-30, `hotel_C` + `hotel_H`, scored by `evaluation/evaluate.py` (Ampliphi's own scoring harness). Numbers below are from the exact artifact shipped in `artifacts/model/` — training is deterministic (see "Engineering hardening"), so re-running `python -m src.train` reproduces this artifact byte-for-byte rather than drifting run to run.
