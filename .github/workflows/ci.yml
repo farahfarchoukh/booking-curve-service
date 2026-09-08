@@ -41,7 +41,7 @@ jobs:
         run: |
           docker run -d --name smoke -p 8000:8000 booking-curve-service:${{ github.sha }}
           sleep 3
-          curl -sf http://localhost:8000/healthz
+          curl -sf http://localhost:8000/livez
           # /readyz is expected to be 503 here: no artifacts/model volume is
           # mounted in this smoke test, so there's no model to load. That's
           # the correct behavior, not a failure — a real deploy mounts the

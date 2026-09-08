@@ -4,7 +4,7 @@ stack (FastAPI/Pydantic).
 
 This is a real serving skeleton, not a toy: the model loads once at
 startup (so a broken artifact fails the readiness probe at deploy time,
-not on a customer's first request), `/healthz` actually reflects load
+not on a customer's first request), `/readyz` actually reflects load
 state, every request gets a traceable request id, errors are split into
 "your input was bad" (400) vs. "something broke on our side" (500), the
 business endpoint is versioned (`/v1/...`), it exposes Prometheus metrics,
@@ -185,16 +185,25 @@ class PriceRecommendationResponse(BaseModel):
     diagnostics: dict
 
 
-@app.get("/healthz")
-def healthz():
-    """Liveness: process is up. Always 200 once the process can respond."""
+@app.get("/livez")
+def livez():
+    """Liveness: process is up. Always 200 once the process can respond.
+
+    Named `/livez`, not the more common `/healthz` — found out the hard
+    way (a live Cloud Run deployment) that GCP's own load-balancer layer
+    reserves `/healthz` at the edge and never forwards it to the
+    container, no matter what the app defines there. `/livez`/`/readyz`
+    is also the more current Kubernetes-ecosystem convention precisely
+    to avoid this kind of collision with a platform's own reserved
+    paths — not an arbitrary rename.
+    """
     return {"status": "ok"}
 
 
 @app.get("/readyz")
 def readyz():
     """Readiness: model actually loaded. A load balancer / ECS task
-    definition should point health checks here, not at /healthz — a
+    definition should point health checks here, not at /livez — a
     process that's up but has no model should not receive traffic."""
     if state.model is None:
         raise HTTPException(

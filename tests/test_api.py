@@ -52,8 +52,8 @@ def client_without_model(tmp_path, monkeypatch):
         yield c
 
 
-def test_healthz_always_ok_even_without_a_model(client_without_model):
-    r = client_without_model.get("/healthz")
+def test_livez_always_ok_even_without_a_model(client_without_model):
+    r = client_without_model.get("/livez")
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
 
@@ -62,7 +62,7 @@ def test_cors_disabled_by_default(client_without_model):
     # BOOKING_CURVE_CORS_ORIGINS is unset in every test fixture — this
     # locks in the fail-closed default: a cross-origin request gets no
     # Access-Control-Allow-Origin header, so a browser would block it.
-    r = client_without_model.get("/healthz", headers={"Origin": "https://evil.example.com"})
+    r = client_without_model.get("/livez", headers={"Origin": "https://evil.example.com"})
     assert "access-control-allow-origin" not in {k.lower() for k in r.headers.keys()}
 
 
@@ -212,7 +212,7 @@ def test_unexpected_error_becomes_500_without_leaking_internals(client_with_mode
 
 
 def test_metrics_endpoint_exposes_prometheus_format(client_with_model):
-    client_with_model.get("/healthz")  # generate at least one counted request first
+    client_with_model.get("/livez")  # generate at least one counted request first
     r = client_with_model.get("/metrics")
     assert r.status_code == 200
     assert "booking_curve_requests_total" in r.text
@@ -246,7 +246,7 @@ def test_rate_limit_actually_trips(client_with_model):
 
 
 def test_every_response_carries_a_request_id(client_with_model):
-    r = client_with_model.get("/healthz")
+    r = client_with_model.get("/livez")
     assert "x-request-id" in r.headers
     # a real uuid4, not a placeholder
     assert len(r.headers["x-request-id"]) == 36
