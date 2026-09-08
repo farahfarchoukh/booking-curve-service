@@ -1,0 +1,55 @@
+# Public-deployment variant of Dockerfile — NOT the production image.
+#
+# The production Dockerfile deliberately mounts data/artifacts as volumes
+# rather than baking them in, specifically because the proprietary
+# Ampliphi extract must never end up inside an image that could reach a
+# registry (see Dockerfile's own comment). That's still true here — this
+# image never touches data/. Instead it generates and trains on the
+# synthetic demo dataset (scripts/generate_demo_data.py, src/demo_data.py)
+# AT BUILD TIME, baking that self-contained, non-proprietary dataset and
+# its trained model into the image so it can run standalone on a public
+# endpoint (Cloud Run) with no volume mounts available.
+#
+# Build:  docker build -f Dockerfile.demo -t booking-curve-service:demo .
+# Run:    docker run --rm -p 8000:8000 booking-curve-service:demo
+#
+# Everything else (base image, libgomp1, entrypoint, non-root user,
+# healthcheck, signal handling) is identical to the production Dockerfile
+# — this only adds the "generate + train demo data" build step and points
+# the service's env vars at the result instead of expecting a mount.
+FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt requirements-api.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-api.txt
+
+COPY src/ src/
+COPY scripts/ scripts/
+COPY evaluation/evaluate.py evaluation/evaluate.py
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Generate the synthetic dataset and train on it, as this repo's own root
+# user during the build — not at container startup, and not as appuser
+# (permissions are simplest to manage before the chown below). Same
+# generator src/demo_data.py — no separate "demo mode" data path to drift
+# from what tests/conftest.py and scripts/generate_demo_data.py already use.
+RUN python -m scripts.generate_demo_data --out /app/demo_data \
+    && python -m src.train --data-dir /app/demo_data --out /app/demo_artifacts
+
+ENV BOOKING_CURVE_DATA_DIR=/app/demo_data
+ENV BOOKING_CURVE_MODEL_BASE_DIR=/app/demo_artifacts
+
+RUN useradd --create-home --uid 1000 appuser \
+    && chown -R appuser:appuser /app/demo_data /app/demo_artifacts
+USER appuser
+
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz', timeout=3).status==200 else 1)"
+
+CMD ["/usr/local/bin/docker-entrypoint.sh"]

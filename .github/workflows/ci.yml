@@ -56,9 +56,10 @@ jobs:
     # promotion gate. Pushes to ghcr.io using the workflow's own built-in
     # GITHUB_TOKEN (repo Settings > Actions > enable "Read and write
     # permissions" for it once) — no external registry account or secret
-    # to provision. This is as far as CI/CD goes here; it does not deploy
-    # anywhere — see DESIGN.md §6.5 for the shadow -> canary -> rollout
-    # path a real deploy would go through from here.
+    # to provision. This publishes the PRODUCTION image (no data baked
+    # in, mounted volumes only — see Dockerfile's own comment); it is not
+    # itself runnable standalone. See DESIGN.md SS6.5 for the shadow ->
+    # canary -> rollout path a real deploy of this image would go through.
     runs-on: ubuntu-latest
     needs: [lint-and-test, docker-build-and-smoke-test]
     if: github.ref == 'refs/heads/main'
@@ -77,3 +78,59 @@ jobs:
           docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
+
+  publish-and-deploy-demo:
+    # A SEPARATE image (Dockerfile.demo) from the one above: this one
+    # bakes in the synthetic demo dataset and a model trained on it at
+    # build time, specifically so it can run standalone on a public
+    # endpoint with no volume mount available. The real Ampliphi extract
+    # is never in this job's reach — it isn't checked into the repo this
+    # runner checked out, same as every other CI job here.
+    #
+    # This is real continuous deployment, not just continuous delivery:
+    # every merge to main that passes lint-and-test and the smoke test
+    # rebuilds the demo image and redeploys it to the live Cloud Run URL,
+    # with no manual step. Auth is a GCP service-account key in
+    # GCP_SA_KEY (repo secret) -- the simpler of the two standard options;
+    # Workload Identity Federation (no long-lived key at all) is what a
+    # real production pipeline should use instead, noted here rather than
+    # built, since it needs its own GCP-side trust-pool setup this
+    # project's scale doesn't yet justify.
+    runs-on: ubuntu-latest
+    needs: [lint-and-test, docker-build-and-smoke-test]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build + smoke-test the demo image before pushing anywhere
+        run: |
+          IMAGE=ghcr.io/${{ github.repository_owner }}/booking-curve-service
+          docker build -f Dockerfile.demo -t "$IMAGE:demo-${{ github.sha }}" -t "$IMAGE:demo" .
+          docker run -d --name demo-smoke -p 8000:8000 "$IMAGE:demo"
+          for i in $(seq 1 20); do curl -sf http://localhost:8000/readyz && break; sleep 1; done
+          curl -sf http://localhost:8000/readyz
+          curl -sf "http://localhost:8000/v1/booking-curve?hotel_id=hotel_X&room_type_code=rt_x1&stay_date=2025-08-15"
+          docker stop demo-smoke
+      - run: |
+          IMAGE=ghcr.io/${{ github.repository_owner }}/booking-curve-service
+          docker push "$IMAGE:demo-${{ github.sha }}"
+          docker push "$IMAGE:demo"
+      - uses: google-github-actions/auth@v3
+        if: ${{ vars.GCP_PROJECT_ID != '' }}
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/deploy-cloudrun@v3
+        if: ${{ vars.GCP_PROJECT_ID != '' }}
+        with:
+          service: booking-curve-service-demo
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          region: ${{ vars.GCP_REGION || 'us-central1' }}
+          image: ghcr.io/${{ github.repository_owner }}/booking-curve-service:demo-${{ github.sha }}
+          flags: "--port=8000 --allow-unauthenticated --min-instances=0 --max-instances=2 --memory=512Mi"
